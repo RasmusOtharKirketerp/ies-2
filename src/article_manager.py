@@ -7,6 +7,7 @@ import nltk
 import os
 from concurrent.futures import ThreadPoolExecutor
 from .scoring_engine import ScoringEngine
+from urllib.parse import urlparse
 
 class ArticleManager:
     def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5):
@@ -155,8 +156,11 @@ class ArticleManager:
                     print(f"[WARNING] No articles found for {source_url}")
                     continue
                 
+                # Sort articles by publication date (newest first)
+                sorted_articles = sorted(source.articles, key=lambda x: x.publish_date or 0, reverse=True)
+                
                 # Limit number of articles per source
-                articles_to_process = source.articles[:self.articles_per_source]
+                articles_to_process = sorted_articles[:self.articles_per_source]
                 print(f"[INFO] Processing {len(articles_to_process)} of {len(source.articles)} articles from {source_url}")
                 self.sources_obj[source_url] = source
                 
@@ -224,6 +228,11 @@ class ArticleManager:
             except Exception as e:
                 print(f"[ERROR] Downloading article {article_obj.url}: {str(e)}")
 
+    def _get_domain(self, url):
+        """Extract the domain from a URL."""
+        parsed_url = urlparse(url)
+        return parsed_url.netloc
+
     def process_single_parse(self, priority, item):
         """Process a single article parse operation."""
         try:
@@ -241,6 +250,8 @@ class ArticleManager:
 
             item["title"] = article_obj.title
             item["content"] = article_obj.text
+            item["favicon"] = article_obj.meta_favicon or f"https://www.google.com/s2/favicons?domain={self._get_domain(item['url'])}"
+            item["source_name"] = self._get_domain(item['url'])
             
             if item["title"] and item["content"]:
                 print(f"[PARSE] Successfully parsed: {item['url']}")
@@ -406,7 +417,9 @@ class ArticleManager:
             "score": article["score"],
             "score_details": article.get("score_details", {}),
             "content": article["content"],
-            "summary": article["summary"]
+            "summary": article["summary"],
+            "favicon": article["favicon"],
+            "source_name": self._get_domain(article["url"])  # Ensure correct domain extraction
         }
 
     def get_toplist(self):

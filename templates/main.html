@@ -1,115 +1,11 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>News Article Dashboard</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
-        .burger-menu { cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
-        .burger-menu div { width: 25px; height: 3px; background: #333; }
-        .menu { display: none; position: absolute; top: 60px; right: 20px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; z-index: 1000; }
-        .menu.active { display: block; }
-        .menu h2 { margin-top: 0; }
-        .stats, .controls { margin-bottom: 20px; }
-        .stat-card, .controls { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .layout-toggle { cursor: pointer; padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; }
-        .articles.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .articles.list { display: block; }
-        .article-card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; margin-bottom: 20px; }
-        .article-card.list { display: block; }
-        .favicon { width: 16px; height: 16px; margin-right: 10px; }
-        .score { font-size: 1.2em; color: #2196F3; font-weight: bold; }
-        .word-list { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
-        .word-tag { background: #e3f2fd; padding: 5px 10px; border-radius: 15px; display: flex; align-items: center; }
-        .delete-word { margin-left: 5px; cursor: pointer; color: #f44336; }
-        input, button { padding: 8px; margin: 5px; }
-        button { background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #1976D2; }
-        .daemon-controls { margin-top: 20px; }
-        .daemon-status { padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .active { background: #c8e6c9; }
-        .inactive { background: #ffcdd2; }
-        .queue-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 15px 0; }
-        .queue-item { background: #f5f5f5; padding: 10px; border-radius: 4px; text-align: center; }
-        .queue-item.active { background: #e3f2fd; border-left: 4px solid #2196F3; }
-        .queue-label { display: block; font-weight: bold; color: #666; }
-        .queue-count { font-size: 1.2em; color: #2196F3; }
-        .system-status { margin-top: 20px; padding: 15px; background: #fff; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .status-item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee; }
-        .status-label { color: #666; font-weight: bold; }
-        .status-value { color: #2196F3; }
-        .status-value.active { color: #4CAF50; }
-        .status-value.inactive { color: #F44336; }
-        .score-details {
-            display: none;
-            background: #f8f8f8;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-        
-        .score-details.show {
-            display: block;
-        }
-        
-        .score-toggle {
-            cursor: pointer;
-            color: #2196F3;
-            user-select: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .score-toggle:hover {
-            color: #1976D2;
-        }
-        
-        .score-toggle::before {
-            content: '+';
-            font-size: 1.2em;
-            font-weight: bold;
-            transition: transform 0.2s;
-        }
-        
-        .score-toggle.active::before {
-            content: '−';
-        }
-
-        .score-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .article-stats {
-            border-top: 1px solid #eee;
-            margin-top: 10px;
-            padding-top: 10px;
-        }
-
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 5px 0;
-            color: #666;
-        }
-
-        .stat-label {
-            font-weight: bold;
-        }
-
-        .full-content {
-            display: none;
-        }
-
-        .full-content.show {
-            display: block;
-        }
-    </style>
+    <link rel="stylesheet" type="text/css" href="/static/styles.css">
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -153,7 +49,9 @@
                     <div class="system-status">
                         <div class="status-item">
                             <span class="status-label">System Status:</span>
-                            <span class="status-value {% if status.processing.is_active %}active{% else %}inactive{% endif %}" id="system-status">
+                            <span
+                                class="status-value {% if status.processing.is_active %}active{% else %}inactive{% endif %}"
+                                id="system-status">
                                 {{ "Active" if status.processing.is_active else "Idle" }}
                             </span>
                         </div>
@@ -167,7 +65,8 @@
                         </div>
                         <div class="status-item">
                             <span class="status-label">Average Score:</span>
-                            <span class="status-value" id="avg-score">{{ "%.2f"|format(status.scoring.stats.avg_score) }}</span>
+                            <span class="status-value" id="avg-score">{{ "%.2f"|format(status.scoring.stats.avg_score)
+                                }}</span>
                         </div>
                         {% if status.scoring.stats.last_update %}
                         <div class="status-item">
@@ -185,42 +84,22 @@
             </div>
         </div>
 
-        <button class="layout-toggle" onclick="toggleLayout()">Toggle Layout</button>
-
-        <div class="articles grid" id="articles">
+        <div class="articles list" id="articles">
             {% for article in articles %}
-            <div class="article-card">
-                <img src="https://www.google.com/s2/favicons?domain={{ article.url }}" class="favicon" alt="favicon">
-                <div>
-                    <h3><a href="{{ article.url }}" target="_blank">{{ article.title }}</a></h3>
-                    <div class="score-info">
-                        <p class="score">Score: {{ "%.2f"|format(article.score) }}</p>
-                        <span class="score-toggle" onclick="toggleScoreDetails(this)">Details</span>
+            <div class="article-card list">
+                <div class="article-header">
+                    <img src="https://www.google.com/s2/favicons?domain={{ article.source_name }}" alt="Favicon"
+                        class="favicon">
+                    <div class="favicon-container tooltip">
+
+                        <span class="tooltiptext">{{ article.source_name }}</span>
                     </div>
-                    <div class="score-details">
-                        <div class="article-stats">
-                            <div class="stat-row">
-                                <span class="stat-label">Title Score:</span>
-                                <span>{{ "%.2f"|format(article.score_details.title_score) }}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Content Score:</span>
-                                <span>{{ "%.2f"|format(article.score_details.content_score) }}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Title Weight:</span>
-                                <span>{{ "%.1f"|format(article.score_details.weights.title) }}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Content Weight:</span>
-                                <span>{{ "%.1f"|format(article.score_details.weights.content) }}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <p>{{ article.summary[:200] }}...</p>
-                    <p class="full-content">{{ article.content }}</p>
-                    <a href="javascript:void(0);" onclick="showFullContent(this)">Read more</a>
+                    <h3 class="article-title"><a href="{{ article.url }}" target="_blank">{{ article.title }}</a></h3>
+                    <span class="article-meta"></span>
                 </div>
+                <p class="article-summary">{{ article.summary }}</p>
+                <p class="full-content" style="display: none;">{{ article.content }}</p>
+                <a href="javascript:void(0);" class="read-more" onclick="toggleFullContent(this)">Read More</a>
             </div>
             {% endfor %}
         </div>
@@ -230,12 +109,6 @@
         function toggleMenu() {
             const menu = document.getElementById('menu');
             menu.classList.toggle('active');
-        }
-
-        function toggleLayout() {
-            const articles = document.getElementById('articles');
-            articles.classList.toggle('grid');
-            articles.classList.toggle('list');
         }
 
         async function updateStatus() {
@@ -302,7 +175,17 @@
         function showFullContent(element) {
             const fullContent = element.previousElementSibling;
             fullContent.classList.toggle('show');
-            element.textContent = fullContent.classList.contains('show') ? 'Show less' : 'Read more';
+            element.textContent = fullContent.classList.contains('show') ? 'Show less' : '+';
+        }
+
+        function showStats(element) {
+            const details = element.querySelector('.score-details');
+            details.style.display = 'block';
+        }
+
+        function hideStats(element) {
+            const details = element.querySelector('.score-details');
+            details.style.display = 'none';
         }
 
         // Add this function to check processing status and control menu
@@ -312,22 +195,21 @@
             const menu = document.getElementById('menu');
 
             // Show menu while processing
-            if (status.processing.is_active || 
-                status.queues.prefetch_queue > 0 || 
-                status.queues.download_queue > 0 || 
-                status.queues.parse_queue > 0 || 
+            if (status.processing.is_active ||
+                status.queues.prefetch_queue > 0 ||
+                status.queues.download_queue > 0 ||
+                status.queues.parse_queue > 0 ||
                 status.queues.nlp_queue > 0) {
                 menu.classList.add('active');
                 // Run status update every 2 seconds
                 if (!window.statusInterval) {
-                    window.statusInterval = setInterval(updateStatus, 2000);
+                    window.statusInterval = setInterval(() => {
+                        updateStatus();
+                        refreshArticles();
+                    }, 2000);
                 }
             } else {
                 menu.classList.remove('active');
-                // Refresh articles if daemon has stopped
-                if (!status.processing.is_active) {
-                    refreshArticles();
-                }
                 // Clear the interval if daemon is not running
                 if (window.statusInterval) {
                     clearInterval(window.statusInterval);
@@ -344,46 +226,26 @@
 
             articles.forEach(article => {
                 const articleCard = document.createElement('div');
-                articleCard.className = 'article-card';
+                articleCard.className = 'article-card list';
                 articleCard.innerHTML = `
-                    <img src="https://www.google.com/s2/favicons?domain=${article.url}" class="favicon" alt="favicon">
-                    <div>
-                        <h3><a href="${article.url}" target="_blank">${article.title}</a></h3>
-                        <div class="score-info">
-                            <p class="score">Score: ${article.score.toFixed(2)}</p>
-                            <span class="score-toggle" onclick="toggleScoreDetails(this)">Details</span>
+                    <div class="article-header">
+                        <div class="favicon-container tooltip">
+                            <img src="https://www.google.com/s2/favicons?domain=${article.source_name}" alt="Favicon" class="favicon">
+                            <span class="tooltiptext">${article.source_name}</span>
                         </div>
-                        <div class="score-details">
-                            <div class="article-stats">
-                                <div class="stat-row">
-                                    <span class="stat-label">Title Score:</span>
-                                    <span>${article.score_details.title_score.toFixed(2)}</span>
-                                </div>
-                                <div class="stat-row">
-                                    <span class="stat-label">Content Score:</span>
-                                    <span>${article.score_details.content_score.toFixed(2)}</span>
-                                </div>
-                                <div class="stat-row">
-                                    <span class="stat-label">Title Weight:</span>
-                                    <span>${article.score_details.weights.title.toFixed(1)}</span>
-                                </div>
-                                <div class="stat-row">
-                                    <span class="stat-label">Content Weight:</span>
-                                    <span>${article.score_details.weights.content.toFixed(1)}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <p>${article.summary.slice(0, 200)}...</p>
-                        <p class="full-content">${article.content}</p>
-                        <a href="javascript:void(0);" onclick="showFullContent(this)">Read more</a>
+                        <h3 class="article-title"><a href="${article.url}" target="_blank">${article.title}</a></h3>
+                        <span class="article-meta"></span>
                     </div>
+                    <p class="article-summary">${article.summary}</p>
+                    <p class="full-content" style="display: none;">${article.content}</p>
+                    <a href="javascript:void(0);" class="read-more" onclick="toggleFullContent(this)">Read More</a>
                 `;
                 articlesContainer.appendChild(articleCard);
             });
         }
 
         // Run status check every 2 seconds
-        setInterval(checkProcessingAndMenu, 2000);
+        checkProcessingAndMenu();
 
         // Keep existing toggle function for manual control
         function toggleMenu() {
@@ -392,19 +254,19 @@
         }
 
         // Modify click outside behavior to respect processing status
-        document.addEventListener('click', async function(event) {
+        document.addEventListener('click', async function (event) {
             const menu = document.getElementById('menu');
             const burger = document.querySelector('.burger-menu');
-            
+
             if (!menu.contains(event.target) && !burger.contains(event.target)) {
                 // Check if we should allow closing
                 const response = await fetch('/status');
                 const status = await response.json();
-                
-                const isProcessing = status.processing.is_active || 
-                    status.queues.prefetch_queue > 0 || 
-                    status.queues.download_queue > 0 || 
-                    status.queues.parse_queue > 0 || 
+
+                const isProcessing = status.processing.is_active ||
+                    status.queues.prefetch_queue > 0 ||
+                    status.queues.download_queue > 0 ||
+                    status.queues.parse_queue > 0 ||
                     status.queues.nlp_queue > 0;
 
                 if (!isProcessing) {
@@ -417,13 +279,31 @@
         // setInterval(updateStatus, 2000);
 
         // Close menu when clicking outside
-        document.addEventListener('click', function(event) {
+        document.addEventListener('click', function (event) {
             const menu = document.getElementById('menu');
             const burger = document.querySelector('.burger-menu');
             if (!menu.contains(event.target) && !burger.contains(event.target)) {
                 menu.classList.remove('active');
             }
         });
+
+        function toggleFullContent(element) {
+            const fullContent = element.previousElementSibling;
+            const summary = fullContent.previousElementSibling;
+            if (fullContent.style.display === 'none') {
+                fullContent.style.display = 'block';
+                summary.style.display = 'none';
+                element.textContent = 'Show Less';
+            } else {
+                fullContent.style.display = 'none';
+                summary.style.display = 'block';
+                element.textContent = 'Read More';
+            }
+        }
     </script>
 </body>
+
+</html>
+</body>
+
 </html>

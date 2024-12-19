@@ -1,5 +1,6 @@
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_from_directory
 from src.article_manager import ArticleManager
+import os
 
 class FlaskRoutesHandler:
     def __init__(self, article_manager):
@@ -11,7 +12,8 @@ class FlaskRoutesHandler:
         """
         self.article_manager = article_manager
         self.app = Flask(__name__, 
-                        template_folder='../templates')  # Set template folder
+                        template_folder='../templates', 
+                        static_folder='../static')  # Set template and static folders
         self.setup_routes()
 
     def setup_routes(self):
@@ -220,6 +222,13 @@ class FlaskRoutesHandler:
             </html>
             """
             return docs_html
+
+        @self.app.route('/favicon.ico')
+        def favicon():
+            return send_from_directory(
+                os.path.join(self.app.root_path, 'static'),
+                'favicon.ico', mimetype='image/vnd.microsoft.icon'
+            )
 
     def run(self, host="0.0.0.0", port=5000):
         """
