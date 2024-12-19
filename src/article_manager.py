@@ -6,6 +6,7 @@ from threading import Lock
 import nltk
 import os
 from concurrent.futures import ThreadPoolExecutor
+from .scoring_engine import ScoringEngine
 
 class ArticleManager:
     def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5):
@@ -46,11 +47,11 @@ class ArticleManager:
         self.daemon_running = False
         self.daemon_thread = None
         self.scoring_weights = {  # Words and their associated weights
-            "technology": 1.0,
-            "politics": 0.8,
-            "sports": 0.5,
-            "entertainment": 0.3,
-            "breaking": 1.2
+            "danmark": 1.0,
+            "Teater": 0.8,
+            "Ukraine": 0.5,
+            "rusland": 0.3,
+            "Krig": 1.2
         }
 
         self.last_access_times = {}  # Track the last access time for each source
@@ -63,6 +64,19 @@ class ArticleManager:
         self.articles_by_source = {}  # Track articles per source
 
         self.sleep_time = 0.5  # Sleep time when queues are empty
+
+        self.scoring_engine = ScoringEngine()
+
+        self.scoring_stats = {
+            "total_scored": 0,
+            "avg_score": 0.0,
+            "last_update": None
+        }
+
+        self.content_weights = {
+            "title": 0.4,    # Title importance weight
+            "content": 0.6,  # Content importance weight
+        }
 
         # Initialize articles after setup
         self.prefetch_articles()
@@ -277,12 +291,50 @@ class ArticleManager:
             except Exception as e:
                 print(f"[ERROR] NLP processing {item['url']}: {str(e)}")
 
+    def update_scoring_stats(self, score):
+        """Update running statistics for scoring."""
+        with self.lock:
+            self.scoring_stats["total_scored"] += 1
+            self.scoring_stats["avg_score"] = (
+                (self.scoring_stats["avg_score"] * (self.scoring_stats["total_scored"] - 1) + score) 
+                / self.scoring_stats["total_scored"]
+            )
+            self.scoring_stats["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
     def score_titles(self, articles):
-        """Compute scores for given article titles."""
+        """Compute scores using vector space model for both title and content."""
+        if not articles:
+            return
+            
+        # Convert scoring weights to interest data format
+        interest_data = [(word, weight) for word, weight in self.scoring_weights.items()]
+        
         for article in articles:
-            if article["title"]:
-                score = sum(self.scoring_weights.get(word.lower(), 0) for word in article["title"].split())
-                article["score"] = score
+            # Score title
+            title_score = self.scoring_engine.calculate_article_scores(
+                [{"content": article["title"]}], 
+                interest_data
+            )[0] if article["title"] else 0
+            
+            # Score content
+            content_score = self.scoring_engine.calculate_article_scores(
+                [{"content": article["content"]}], 
+                interest_data
+            )[0] if article["content"] else 0
+            
+            # Combine scores with weights
+            final_score = (
+                self.content_weights["title"] * title_score +
+                self.content_weights["content"] * content_score
+            )
+            
+            article["score"] = float(final_score)
+            article["score_details"] = {
+                "title_score": float(title_score),
+                "content_score": float(content_score),
+                "weights": self.content_weights
+            }
+            self.update_scoring_stats(final_score)
 
     def update_toplist(self, article):
         """
@@ -333,6 +385,7 @@ class ArticleManager:
             "url": article["url"],
             "title": article["title"],
             "score": article["score"],
+            "score_details": article.get("score_details", {}),
             "content": article["content"],
             "summary": article["summary"]
         }
@@ -399,13 +452,31 @@ class ArticleManager:
         Returns:
             dict: A dictionary containing the size of each queue.
         """
-        return {
-            "prefetch_queue": self.prefetch_queue.qsize(),
-            "download_queue": self.download_queue.qsize(),
-            "parse_queue": self.parse_queue.qsize(),
-            "nlp_queue": self.nlp_queue.qsize(),
-            "is_processing": not self.all_queues_empty() and self.daemon_running
+        status = {
+            "queues": {
+                "prefetch_queue": self.prefetch_queue.qsize(),
+                "download_queue": self.download_queue.qsize(),
+                "parse_queue": self.parse_queue.qsize(),
+                "nlp_queue": self.nlp_queue.qsize(),
+            },
+            "processing": {
+                "is_active": not self.all_queues_empty() and self.daemon_running,
+                "daemon_running": self.daemon_running,
+                "total_articles": sum([q.qsize() for q in [
+                    self.prefetch_queue, 
+                    self.download_queue, 
+                    self.parse_queue, 
+                    self.nlp_queue
+                ]])
+            },
+            "scoring": {
+                "active_weights": self.scoring_weights,
+                "stats": self.scoring_stats,
+                "scored_articles": len(self.toplist),
+                "scoring_engine": "vector_space_model"
+            }
         }
+        return status
 
     def get_queue_contents(self, queue):
         """Safely get contents of a queue without removing items."""

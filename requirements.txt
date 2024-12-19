@@ -4,7 +4,6 @@ Werkzeug==2.0.1
 
 # News Scraping
 newspaper3k==0.2.8
-nltk==3.6.3
 requests==2.26.0
 beautifulsoup4==4.9.3
 lxml==4.9.3
@@ -23,3 +22,9 @@ urllib3==1.26.18
 # Text Processing
 feedparser==6.0.8
 Pillow==10.0.1
+
+# ML Stack - Fixed versions to ensure compatibility
+numpy==1.23.5
+scipy==1.10.1
+scikit-learn==1.2.2
+nltk==3.8.1
