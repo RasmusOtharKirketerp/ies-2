@@ -47,11 +47,24 @@ class ArticleManager:
         self.daemon_running = False
         self.daemon_thread = None
         self.scoring_weights = {  # Words and their associated weights
-            "danmark": 1.0,
-            "Teater": 0.8,
-            "Ukraine": 0.5,
+            "danmark": 0.7,
+            "teater": 0.8,
+            "ukraine": 0.9,
             "rusland": 0.3,
-            "Krig": 1.2
+            "krig": 0.8,
+            "fred": 0.7,
+            "klima": 0.3,
+            "teknologi": 0.9,
+            "sundhed": 0.6,
+            "bitcoins": 1.0,
+            "lgbt": -1.0,
+            "europa": 0.5,
+            "zelenskyj": 1.0,
+            "politi": 0.5,
+            "eksplosion": 0.7,
+            "kursfald": 0.6,
+            "københavn": 0.1,
+            "kina": 0.8
         }
 
         self.last_access_times = {}  # Track the last access time for each source
@@ -80,6 +93,8 @@ class ArticleManager:
 
         # Initialize articles after setup
         self.prefetch_articles()
+        if auto_start:
+            self.start_daemon()
         
     @staticmethod
     def _initialize_nltk():
@@ -166,6 +181,10 @@ class ArticleManager:
                     self.articles_by_source[source_url].append(item)
             except Exception as e:
                 print(f"[ERROR] Building source {source_url}: {str(e)}")
+        
+        # Start the daemon after prefetching is complete
+        if not self.daemon_running:
+            self.start_daemon()
 
     def all_queues_empty(self):
         """Check if all queues are empty."""

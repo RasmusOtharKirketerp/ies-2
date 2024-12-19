@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from src.article_manager import ArticleManager
 
 class FlaskRoutesHandler:
@@ -10,13 +10,21 @@ class FlaskRoutesHandler:
             article_manager (ArticleManager): Instance of the ArticleManager class.
         """
         self.article_manager = article_manager
-        self.app = Flask(__name__)
+        self.app = Flask(__name__, 
+                        template_folder='../templates')  # Set template folder
         self.setup_routes()
 
     def setup_routes(self):
         """
         Setup all Flask routes.
         """
+        @self.app.route("/", methods=["GET"])
+        def main_page():
+            """Display the main page with articles and controls."""
+            status = self.article_manager.get_queue_status()
+            articles = self.article_manager.get_toplist()
+            return render_template('main.html', status=status, articles=articles)
+
         @self.app.route("/status", methods=["GET"])
         def get_status():
             """Get the status of all queues."""
