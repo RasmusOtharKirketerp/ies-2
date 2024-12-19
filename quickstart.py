@@ -9,11 +9,13 @@ if __name__ == "__main__":
         "https://www.bt.dk"
     ]
     
-    # Create manager without starting daemon
+    # Create manager with testing configuration
     manager = ArticleManager(
         sources=sources,
         toplist_size=5,
-        throttle_interval=2
+        throttle_interval=2,
+        auto_start=False,  # Don't start daemon automatically
+        articles_per_source=3  # Limit articles for testing
     )
     
     # Create and run Flask app (daemon can be started via API)

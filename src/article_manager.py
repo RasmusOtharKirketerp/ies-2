@@ -5,9 +5,10 @@ from newspaper import Article, Source, Config
 from threading import Lock
 import nltk
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 class ArticleManager:
-    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True):
+    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5):
         """
         Initialize the ArticleManager.
 
@@ -16,8 +17,9 @@ class ArticleManager:
             toplist_size (int): Number of articles to maintain in the toplist.
             throttle_interval (int): Minimum time (seconds) between requests to a website.
             auto_start (bool): Whether to automatically start the daemon threads.
+            articles_per_source (int): Maximum number of articles to fetch per source.
         """
-        print(f"\n[INIT] Starting ArticleManager with sources: {sources}")
+        print(f"\n[INIT] Starting ArticleManager with {articles_per_source} articles per source")
         # Ensure NLTK resources are downloaded
         self._initialize_nltk()
         
@@ -54,6 +56,13 @@ class ArticleManager:
         self.last_access_times = {}  # Track the last access time for each source
         self.article_counter = 0  # Add counter for unique priorities
         self.lock = Lock()  # Ensure thread-safe updates to last_access_times and counter
+
+        self.articles_per_source = articles_per_source
+        self.max_workers = min(4, articles_per_source * len(sources))  # Adjust workers based on article count
+        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        self.articles_by_source = {}  # Track articles per source
+
+        self.sleep_time = 0.5  # Sleep time when queues are empty
 
         # Initialize articles after setup
         self.prefetch_articles()
@@ -103,6 +112,8 @@ class ArticleManager:
     def prefetch_articles(self):
         """Fetch metadata (titles and URLs) for articles from sources."""
         print("\n[PREFETCH] Starting to prefetch articles")
+        self.articles_by_source = {source: [] for source in self.sources}  # Reset tracking
+        
         for source_url in self.sources:
             self._throttle_request(source_url)
             try:
@@ -115,11 +126,13 @@ class ArticleManager:
                     print(f"[WARNING] No articles found for {source_url}")
                     continue
                 
-                print(f"[INFO] Found {len(source.articles)} articles from {source_url}")
+                # Limit number of articles per source
+                articles_to_process = source.articles[:self.articles_per_source]
+                print(f"[INFO] Processing {len(articles_to_process)} of {len(source.articles)} articles from {source_url}")
                 self.sources_obj[source_url] = source
                 
-                # Queue each article from the source
-                for article in source.articles:
+                # Queue limited number of articles from the source
+                for article in articles_to_process:
                     if not article.url:
                         continue
                     print(f"[PREFETCH] Found article: {article.url}")
@@ -128,6 +141,7 @@ class ArticleManager:
                     article_obj = Article(article.url, config=self.config)
                     item = {
                         "url": article.url,
+                        "source_url": source_url,  # Add source tracking
                         "article_obj": article_obj,
                         "title": None,
                         "score": None,
@@ -135,63 +149,133 @@ class ArticleManager:
                         "summary": None
                     }
                     self.prefetch_queue.put((priority, item))
+                    self.articles_by_source[source_url].append(item)
             except Exception as e:
                 print(f"[ERROR] Building source {source_url}: {str(e)}")
+
+    def all_queues_empty(self):
+        """Check if all queues are empty."""
+        return (self.prefetch_queue.empty() and 
+                self.download_queue.empty() and 
+                self.parse_queue.empty() and 
+                self.nlp_queue.empty())
 
     def process_prefetch_queue(self):
         """Process articles from the prefetch queue and move to the download queue."""
         while self.daemon_running:
-            if not self.prefetch_queue.empty():
-                priority, article = self.prefetch_queue.get()
-                print(f"[PREFETCH] Moving article to download queue: {article['url']}")
-                self.download_queue.put((priority, article))
+            if self.prefetch_queue.empty():
+                time.sleep(self.sleep_time)
+                continue
+                
+            priority, article = self.prefetch_queue.get()
+            print(f"[PREFETCH] Moving article to download queue: {article['url']}")
+            self.download_queue.put((priority, article))
 
     def process_download_queue(self):
         """Download article content and move to the parse queue."""
         while self.daemon_running:
-            if not self.download_queue.empty():
-                priority, item = self.download_queue.get()
-                article_obj = item["article_obj"]
-                try:
-                    print(f"[DOWNLOAD] Processing: {article_obj.url}")
-                    self._throttle_request(article_obj.url)
-                    article_obj.download()
-                    if article_obj.html:
-                        self.parse_queue.put((priority, item))
-                    else:
-                        print(f"[ERROR] No HTML content for {article_obj.url}")
-                except Exception as e:
-                    print(f"[ERROR] Downloading article {article_obj.url}: {str(e)}")
+            if self.download_queue.empty():
+                time.sleep(self.sleep_time)
+                continue
+                
+            priority, item = self.download_queue.get()
+            article_obj = item["article_obj"]
+            try:
+                print(f"[DOWNLOAD] Processing: {article_obj.url}")
+                self._throttle_request(article_obj.url)
+                article_obj.download()
+                if article_obj.html:
+                    self.parse_queue.put((priority, item))
+                else:
+                    print(f"[ERROR] No HTML content for {article_obj.url}")
+            except Exception as e:
+                print(f"[ERROR] Downloading article {article_obj.url}: {str(e)}")
+
+    def process_single_parse(self, priority, item):
+        """Process a single article parse operation."""
+        try:
+            print(f"[PARSE] Processing: {item['url']}")
+            article_obj = item["article_obj"]
+            if not article_obj.html:
+                print(f"[PARSE] No HTML content for: {item['url']}")
+                return False
+                
+            article_obj.parse()
+            
+            if not article_obj.is_parsed:
+                print(f"[PARSE] Failed to parse: {item['url']}")
+                return False
+
+            item["title"] = article_obj.title
+            item["content"] = article_obj.text
+            
+            if item["title"] and item["content"]:
+                print(f"[PARSE] Successfully parsed: {item['url']}")
+                self.nlp_queue.put((priority, item))
+                return True
+            else:
+                print(f"[PARSE] Missing content after parse: {item['url']}")
+                return False
+                
+        except Exception as e:
+            print(f"[ERROR] Parsing article {item['url']}: {str(e)}")
+            return False
 
     def process_parse_queue(self):
-        """Parse downloaded articles and move to the NLP queue."""
+        """Parse downloaded articles concurrently and move to the NLP queue."""
+        print(f"[PARSE] Starting parse queue processor with {self.max_workers} workers")
         while self.daemon_running:
-            if not self.parse_queue.empty():
-                priority, item = self.parse_queue.get()
-                article_obj = item["article_obj"]
-                try:
-                    print(f"[PARSE] Processing: {article_obj.url}")
-                    article_obj.parse()
-                    item["title"] = article_obj.title
-                    item["content"] = article_obj.text
-                    self.nlp_queue.put((priority, item))
-                except Exception as e:
-                    print(f"[ERROR] Parsing article: {e}")
+            try:
+                if self.parse_queue.empty():
+                    time.sleep(self.sleep_time)
+                    continue
+
+                # Get items to process
+                items = []
+                for _ in range(min(self.max_workers, self.parse_queue.qsize())):
+                    if not self.parse_queue.empty():
+                        items.append(self.parse_queue.get())
+                
+                if not items:
+                    continue
+
+                # Process batch
+                futures = []
+                for priority, item in items:
+                    future = self.executor.submit(self.process_single_parse, priority, item)
+                    futures.append((future, priority, item))
+                
+                # Wait for batch to complete
+                for future, priority, item in futures:
+                    try:
+                        success = future.result(timeout=30)
+                        if not success:
+                            print(f"[PARSE] Failed to process: {item['url']}")
+                    except Exception as e:
+                        print(f"[ERROR] Future execution failed for {item['url']}: {str(e)}")
+
+            except Exception as e:
+                print(f"[ERROR] Parse queue processor error: {str(e)}")
+                time.sleep(self.sleep_time)
 
     def process_nlp_queue(self):
         """Run NLP on parsed articles and update toplist."""
         while self.daemon_running:
-            if not self.nlp_queue.empty():
-                priority, item = self.nlp_queue.get()
+            if self.nlp_queue.empty():
+                time.sleep(self.sleep_time)
+                continue
+                
+            priority, item = self.nlp_queue.get()
+            try:
+                print(f"[NLP] Processing: {item['url']}")
                 article_obj = item["article_obj"]
-                try:
-                    print(f"[NLP] Processing: {article_obj.url}")
-                    article_obj.nlp()
-                    item["summary"] = article_obj.summary
-                    self.score_titles([item])
-                    self.update_toplist(item)
-                except Exception as e:
-                    print(f"[ERROR] NLP processing: {e}")
+                article_obj.nlp()
+                item["summary"] = article_obj.summary
+                self.score_titles([item])
+                self.update_toplist(item)
+                print(f"[NLP] Successfully processed: {item['url']}")
+            except Exception as e:
+                print(f"[ERROR] NLP processing {item['url']}: {str(e)}")
 
     def score_titles(self, articles):
         """Compute scores for given article titles."""
@@ -215,15 +299,23 @@ class ArticleManager:
                 self.toplist[0] = article
 
     def start_daemon(self):
-        """
-        Start the daemon threads to process all queues."""
+        """Start the daemon threads to process all queues."""
         if not self.daemon_running:
             print("[DAEMON] Starting article processing daemon...")
             self.daemon_running = True
-            threading.Thread(target=self.process_prefetch_queue, daemon=True).start()
-            threading.Thread(target=self.process_download_queue, daemon=True).start()
-            threading.Thread(target=self.process_parse_queue, daemon=True).start()
-            threading.Thread(target=self.process_nlp_queue, daemon=True).start()
+            
+            # Start all processing threads
+            threads = [
+                threading.Thread(target=self.process_prefetch_queue, daemon=True),
+                threading.Thread(target=self.process_download_queue, daemon=True),
+                threading.Thread(target=self.process_parse_queue, daemon=True),
+                threading.Thread(target=self.process_nlp_queue, daemon=True)
+            ]
+            
+            for thread in threads:
+                thread.start()
+                print(f"[DAEMON] Started thread: {thread.name}")
+            
             print("[DAEMON] All processing threads started")
 
     def stop_daemon(self):
@@ -232,7 +324,8 @@ class ArticleManager:
         if self.daemon_running:
             print("[DAEMON] Stopping article processing daemon...")
             self.daemon_running = False
-            print("[DAEMON] Stop signal sent to all threads")
+            self.executor.shutdown(wait=True)
+            print("[DAEMON] All threads stopped")
 
     def _serialize_article(self, article):
         """Convert article to JSON-serializable format."""
@@ -310,8 +403,19 @@ class ArticleManager:
             "prefetch_queue": self.prefetch_queue.qsize(),
             "download_queue": self.download_queue.qsize(),
             "parse_queue": self.parse_queue.qsize(),
-            "nlp_queue": self.nlp_queue.qsize()
+            "nlp_queue": self.nlp_queue.qsize(),
+            "is_processing": not self.all_queues_empty() and self.daemon_running
         }
+
+    def get_queue_contents(self, queue):
+        """Safely get contents of a queue without removing items."""
+        with self.lock:
+            return list(queue.queue) if not queue.empty() else []
+
+    def get_articles_in_queue_for_source(self, queue, source_url):
+        """Count articles for a specific source in a queue."""
+        queue_contents = self.get_queue_contents(queue)
+        return sum(1 for _, item in queue_contents if item["source_url"] == source_url)
 
     def get_sources(self):
         """
@@ -321,18 +425,45 @@ class ArticleManager:
             dict: Dictionary with sources and their status
         """
         sources_status = {}
-        for source in self.sources:
+        for source_url in self.sources:
             try:
-                source_obj = Source(source)
-                sources_status[source] = {
-                    "url": source,
+                # Use cached source object if available
+                source_obj = self.sources_obj.get(source_url)
+                if not source_obj:
+                    source_obj = Source(source_url, config=self.config)
+                    source_obj.build()
+                
+                # Count articles in each queue for this source
+                in_prefetch = self.get_articles_in_queue_for_source(self.prefetch_queue, source_url)
+                in_download = self.get_articles_in_queue_for_source(self.download_queue, source_url)
+                in_parse = self.get_articles_in_queue_for_source(self.parse_queue, source_url)
+                in_nlp = self.get_articles_in_queue_for_source(self.nlp_queue, source_url)
+                
+                # Get total articles originally fetched for this source
+                total_articles = len(self.articles_by_source.get(source_url, []))
+
+                sources_status[source_url] = {
+                    "url": source_url,
                     "status": "active",
-                    "article_count": len(source_obj.articles) if source_obj.articles else 0
+                    "article_count": total_articles,
+                    "articles_by_stage": {
+                        "prefetch": in_prefetch,
+                        "download": in_download,
+                        "parse": in_parse,
+                        "nlp": in_nlp
+                    }
                 }
             except Exception as e:
-                sources_status[source] = {
-                    "url": source,
+                sources_status[source_url] = {
+                    "url": source_url,
                     "status": "error",
-                    "error": str(e)
+                    "error": str(e),
+                    "article_count": 0,
+                    "articles_by_stage": {
+                        "prefetch": 0,
+                        "download": 0,
+                        "parse": 0,
+                        "nlp": 0
+                    }
                 }
         return sources_status

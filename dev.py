@@ -17,7 +17,8 @@ def main():
     article_manager = ArticleManager(
         sources=sources,
         toplist_size=5,
-        throttle_interval=1
+        throttle_interval=1,
+        articles_per_source=3  # Only fetch 3 articles per source for testing
     )
     
     print("Starting daemon...")
