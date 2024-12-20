@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .scoring_engine import ScoringEngine
 from urllib.parse import urlparse
 from langdetect import detect
+from datetime import datetime
 
 class ArticleManager:
     def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5):
@@ -49,25 +50,142 @@ class ArticleManager:
         self.daemon_running = False
         self.daemon_thread = None
         self.scoring_weights = {  # Words and their associated weights
-            "danmark": 0.7,
-            "teater": 0.8,
-            "ukraine": 0.9,
-            "rusland": 0.3,
-            "krig": 0.8,
-            "fred": 0.7,
-            "klima": 0.3,
-            "teknologi": 0.9,
-            "sundhed": 0.6,
-            "bitcoins": 1.0,
-            "lgbt": -1.0,
-            "europa": 0.5,
-            "zelenskyj": 1.0,
-            "politi": 0.5,
-            "eksplosion": 0.7,
-            "kursfald": 0.6,
-            "københavn": 0.1,
-            "kina": 0.8
-        }
+    "danmark": 0.7,
+    "teater": 0.8,
+    "ukraine": 0.9,
+    "rusland": 0.3,
+    "krig": 0.8,
+    "fred": 0.7,
+    "klima": 0.6,
+    "teknologi": 1.0,
+    "sundhed": 0.6,
+    "bitcoins": 0.8,
+    "lgbt": 0.5,
+    "europa": 0.7,
+    "zelenskyj": 1.0,
+    "politi": 0.5,
+    "eksplosion": 0.6,
+    "kursfald": 0.6,
+    "københavn": 0.6,
+    "kina": 0.7,
+    "miljø": 0.6,
+    "biodiversitet": 0.6,
+    "demokrati": 0.8,
+    "valg": 0.7,
+    "flygtninge": 0.5,
+    "terror": -0.5,
+    "uddannelse": 0.9,
+    "helbred": 0.6,
+    "vaccination": 0.6,
+    "pandemi": 0.4,
+    "infrastruktur": 0.8,
+    "astronomi": 0.9,
+    "nordkorea": -0.3,
+    "kunst": 0.6,
+    "musik": 0.8,
+    "videnskab": 1.0,
+    "økonomi": 0.7,
+    "børneopdragelse": 0.4,
+    "familie": 0.5,
+    "arbejdsløshed": -0.3,
+    "integration": 0.6,
+    "religion": 0.4,
+    "genbrug": 0.7,
+    "affald": 0.6,
+    "energi": 1.0,
+    "solceller": 1.0,
+    "vindmøller": 1.0,
+    "atomkraft": 0.9,
+    "elbil": 1.0,
+    "natur": 0.7,
+    "hav": 0.6,
+    "skov": 0.7,
+    "bjerg": 0.5,
+    "data": 1.0,
+    "cybersikkerhed": 0.9,
+    "hacking": 0.8,
+    "mobiltelefon": 0.5,
+    "sociale medier": 0.3,
+    "fake news": 0.4,
+    "medier": 0.6,
+    "journalistik": 0.7,
+    "forbrug": 0.4,
+    "madspild": 0.6,
+    "landbrug": 0.4,
+    "fællesskab": 0.7,
+    "sprog": 0.7,
+    "historie": 0.8,
+    "fremtid": 1.0,
+    "fortid": 0.5,
+    "dansk": 0.7,
+    "internationalt": 0.7,
+    "handel": 0.6,
+    "grænser": 0.4,
+    "frihed": 0.8,
+    "censur": -0.5,
+    "kunstig intelligens": 1.0,
+    "maskinlæring": 1.0,
+    "robotter": 0.9,
+    "automation": 0.9,
+    "virksomheder": 0.6,
+    "arbejdsmarked": 0.4,
+    "inflation": 0.5,
+    "innovation": 1.0,
+    "hjerneforskning": 0.8,
+    "psykologi": 0.9,  # Reflects your understanding and experience with STPD
+    "filosofi": 0.7,
+    "etik": 0.8,
+    "samfund": 0.5,
+    "velfærd": 0.6,
+    "børn": 0.5,
+    "unge": 0.5,
+    "seniorer": 0.4,
+    "ensomhed": 0.5,  # A nuanced weight reflecting empathy but also challenge
+    "forandring": 0.8,
+    "eventyr": 0.6,
+    "turisme": 0.4,
+    "flyrejser": 0.3,
+    "tog": 0.7,
+    "transport": 0.6,
+    "menneskerettigheder": 0.8,
+    "rettigheder": 0.7,
+    "sport": 0.4,
+    "fodbold": 0.5,
+    "neurodiversitet": 1.0,  # High due to personal relevance
+    "schizotypi": 1.0,  # Directly tied to your diagnosis and advocacy
+    "medicin": 0.9,  # Reflecting your experience with quetiapine
+    "søvn": 0.7,
+    "arbejde": 0.6,
+    "kreativitet": 1.0,  # High due to your creative problem-solving abilities
+    "logik": 0.9,
+    "matematik": 0.8,
+    "programmering": 1.0,
+    "open source": 0.9,
+    "projekter": 1.0,
+    "autonomi": 0.8,
+    "systemdesign": 1.0,
+    "produktivitetsværktøjer": 0.8,
+    "flask": 1.0,  # Direct project relevance
+    "mqtt": 1.0,  # Direct project relevance
+    "docker": 1.0,  # Direct project relevance
+    "virtualisering": 0.9,
+    "garmin": 0.8,  # Reflects interest in fitness tech
+    "løb": 0.7,
+    "hund": 0.8,  # Reflecting your relationship with Kenobi
+    "dyrevelfærd": 0.7,
+    "muskelhukommelse": 0.6,
+    "terapi": 0.7,
+    "introspektion": 1.0,  # Reflects your reflective nature
+    "empati": 0.9,
+    "humor": 0.8,
+    "puns": 0.8,  # Specific to your enjoyment
+    "kommunikation": 0.7,
+    "brætspil": 0.5,
+    "programmeringssprog": 1.0,
+    "tf-idf": 0.9,  # Specific to your project
+    "nytår": 0.6
+}
+
 
         self.last_access_times = {}  # Track the last access time for each source
         self.article_counter = 0  # Add counter for unique priorities
@@ -251,9 +369,10 @@ class ArticleManager:
 
             item["title"] = article_obj.title
             item["content"] = article_obj.text
-            item["favicon"] = article_obj.meta_favicon or f"https://www.google.com/s2/favicons?domain={self._get_domain(item['url'])}"
+            item["favicon"] = article_obj.meta_favicon or f"https://www.google.com/s2/favicons?domain={self._get_domain(item['url'])}" or "/static/default_favicon.ico"
             item["source_name"] = self._get_domain(item['url'])
             item["language"] = detect(article_obj.text) if article_obj.text else 'da'  # Detect language or default to Danish
+            item["publish_date"] = article_obj.publish_date or datetime.now()  # Use current time if publish date is not available
             
             if item["title"] and item["content"]:
                 print(f"[PARSE] Successfully parsed: {item['url']}")
@@ -420,8 +539,9 @@ class ArticleManager:
             "score_details": article.get("score_details", {}),
             "content": article["content"],
             "summary": article["summary"],
-            "favicon": article["favicon"],
-            "source_name": self._get_domain(article["url"])  # Ensure correct domain extraction
+            "favicon": article["favicon"] or "/static/default_favicon.ico",
+            "source_name": self._get_domain(article["url"]),  # Ensure correct domain extraction
+            "publish_date": article["publish_date"].isoformat() if article.get("publish_date") else None
         }
 
     def get_toplist(self):
@@ -473,11 +593,34 @@ class ArticleManager:
         """
         Recalculate scores for all articles based on updated scoring weights.
         """
-        for article in self.articles:
-            if article.get("title"):
-                score = sum(self.scoring_weights.get(word.lower(), 0) for word in article["title"].split())
-                article["score"] = score
-        self.toplist = sorted(self.articles, key=lambda x: x.get("score", 0), reverse=True)[:self.toplist_size]
+        interest_data = [(word, weight) for word, weight in self.scoring_weights.items()]
+        for article in self.toplist:
+            # Score title
+            title_score = self.scoring_engine.calculate_article_scores(
+                [{"content": article["title"]}], 
+                interest_data
+            )[0] if article["title"] else 0
+            
+            # Score content
+            content_score = self.scoring_engine.calculate_article_scores(
+                [{"content": article["content"]}], 
+                interest_data
+            )[0] if article["content"] else 0
+            
+            # Combine scores with weights
+            final_score = (
+                self.content_weights["title"] * title_score +
+                self.content_weights["content"] * content_score
+            )
+            
+            article["score"] = float(final_score)
+            article["score_details"] = {
+                "title_score": float(title_score),
+                "content_score": float(content_score),
+                "weights": self.content_weights
+            }
+            self.update_scoring_stats(final_score)
+        self.toplist = sorted(self.toplist, key=lambda x: x["score"], reverse=True)[:self.toplist_size]
 
     def get_queue_status(self):
         """
@@ -508,7 +651,20 @@ class ArticleManager:
                 "stats": self.scoring_stats,
                 "scored_articles": len(self.toplist),
                 "scoring_engine": "vector_space_model"
-            }
+            },
+            "articles": [
+                {
+                    "url": article["url"],
+                    "title": article["title"],
+                    "score": article["score"],
+                    "score_details": article.get("score_details", {}),
+                    "content": article["content"],
+                    "summary": article["summary"],
+                    "favicon": article["favicon"],
+                    "source_name": self._get_domain(article["url"])
+                }
+                for article in self.toplist
+            ]
         }
         return status
 

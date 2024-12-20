@@ -2,14 +2,14 @@
 <html>
 
 <head>
-    <title>News Article Dashboard</title>
+    <title>Rasmus News Article browser</title>
     <link rel="stylesheet" type="text/css" href="/static/styles.css">
 </head>
 
 <body>
     <div class="container">
         <div class="header">
-            <h1>News Article Dashboard</h1>
+            <h1>Rasmus News Article browser</h1>
             <div class="burger-menu" onclick="toggleMenu()">
                 <div></div>
                 <div></div>
@@ -18,23 +18,6 @@
         </div>
 
         <div class="menu" id="menu">
-            <div class="controls">
-                <h2>Scoring Words</h2>
-                <div class="word-list">
-                    {% for word, weight in status.scoring.active_weights.items() %}
-                    <div class="word-tag">
-                        {{ word }} ({{ weight }})
-                        <span class="delete-word" onclick="deleteWord('{{ word }}')">×</span>
-                    </div>
-                    {% endfor %}
-                </div>
-                <div>
-                    <input id="new-word" placeholder="New word">
-                    <input id="new-weight" type="number" step="0.1" placeholder="Weight">
-                    <button onclick="addWord()">Add Word</button>
-                </div>
-            </div>
-
             <div class="stats">
                 <div class="stat-card">
                     <h3>Queue Status</h3>
@@ -78,6 +61,23 @@
                 </div>
             </div>
 
+            <div class="controls">
+                <h2>Scoring Words</h2>
+                <div class="word-list">
+                    {% for word, weight in status.scoring.active_weights.items() %}
+                    <div class="word-tag">
+                        {{ word }} ({{ weight }})
+                        <span class="delete-word" onclick="deleteWord('{{ word }}')">×</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div>
+                    <input id="new-word" placeholder="New word">
+                    <input id="new-weight" type="number" step="0.1" placeholder="Weight">
+                    <button onclick="addWord()">Add Word</button>
+                </div>
+            </div>
+
             <div class="daemon-controls">
                 <button onclick="toggleDaemon('start')">Start Daemon</button>
                 <button onclick="toggleDaemon('stop')">Stop Daemon</button>
@@ -89,16 +89,67 @@
             <div class="article-card list">
                 <div class="article-header">
                     <img src="https://www.google.com/s2/favicons?domain={{ article.source_name }}" alt="Favicon"
-                        class="favicon">
-                    <div class="favicon-container tooltip">
-
-                        <span class="tooltiptext">{{ article.source_name }}</span>
-                    </div>
+                        class="favicon" onerror="this.onerror=null;this.src='/static/default_favicon.ico';">
                     <h3 class="article-title"><a href="{{ article.url }}" target="_blank">{{ article.title }}</a></h3>
-                    <span class="article-meta"></span>
+                    <span class="article-meta">{{ article.publish_date|time_since }} ago</span>
                 </div>
                 <p class="article-summary">{{ article.summary }}</p>
                 <p class="full-content" style="display: none;">{{ article.content }}</p>
+                <div class="score-container">
+                    <div class="smiley-scoreboard" onmouseenter="showTooltip(this)" onmouseleave="hideTooltip(this)">
+                        {% if article.score >= 1 %}
+                        <span>🌟</span>
+                        {% elif article.score >= 0.95 %}
+                        <span>😀</span>
+                        {% elif article.score >= 0.9 %}
+                        <span>😄</span>
+                        {% elif article.score >= 0.85 %}
+                        <span>🙂</span>
+                        {% elif article.score >= 0.8 %}
+                        <span>😊</span>
+                        {% elif article.score >= 0.75 %}
+                        <span>😉</span>
+                        {% elif article.score >= 0.7 %}
+                        <span>😌</span>
+                        {% elif article.score >= 0.65 %}
+                        <span>😏</span>
+                        {% elif article.score >= 0.6 %}
+                        <span>😐</span>
+                        {% elif article.score >= 0.55 %}
+                        <span>😶</span>
+                        {% elif article.score >= 0.5 %}
+                        <span>😑</span>
+                        {% elif article.score >= 0.45 %}
+                        <span>🙃</span>
+                        {% elif article.score >= 0.4 %}
+                        <span>😔</span>
+                        {% elif article.score >= 0.35 %}
+                        <span>😟</span>
+                        {% elif article.score >= 0.3 %}
+                        <span>😕</span>
+                        {% elif article.score >= 0.25 %}
+                        <span>😣</span>
+                        {% elif article.score >= 0.2 %}
+                        <span>😞</span>
+                        {% elif article.score >= 0.15 %}
+                        <span>😖</span>
+                        {% elif article.score >= 0.1 %}
+                        <span>😢</span>
+                        {% elif article.score >= 0.05 %}
+                        <span>😭</span>
+                        {% else %}
+                        <span>😡</span>
+                        {% endif %}
+
+                        <div class="score-tooltip">
+                            <p>Overall Score: {{ article.score }}</p>
+                            <p>Title Score: {{ article.score_details.title_score }}</p>
+                            <p>Content Score: {{ article.score_details.content_score }}</p>
+                            <p>Weights: Title - {{ article.score_details.weights.title }}, Content - {{
+                                article.score_details.weights.content }}</p>
+                        </div>
+                    </div>
+                </div>
                 <a href="javascript:void(0);" class="read-more" onclick="toggleFullContent(this)">Read More</a>
             </div>
             {% endfor %}
@@ -166,127 +217,6 @@
             updateStatus();
         }
 
-        function toggleScoreDetails(element) {
-            const details = element.parentNode.nextElementSibling;
-            details.classList.toggle('show');
-            element.classList.toggle('active');
-        }
-
-        function showFullContent(element) {
-            const fullContent = element.previousElementSibling;
-            fullContent.classList.toggle('show');
-            element.textContent = fullContent.classList.contains('show') ? 'Show less' : '+';
-        }
-
-        function showStats(element) {
-            const details = element.querySelector('.score-details');
-            details.style.display = 'block';
-        }
-
-        function hideStats(element) {
-            const details = element.querySelector('.score-details');
-            details.style.display = 'none';
-        }
-
-        // Add this function to check processing status and control menu
-        async function checkProcessingAndMenu() {
-            const response = await fetch('/status');
-            const status = await response.json();
-            const menu = document.getElementById('menu');
-
-            // Show menu while processing
-            if (status.processing.is_active ||
-                status.queues.prefetch_queue > 0 ||
-                status.queues.download_queue > 0 ||
-                status.queues.parse_queue > 0 ||
-                status.queues.nlp_queue > 0) {
-                menu.classList.add('active');
-                // Run status update every 2 seconds
-                if (!window.statusInterval) {
-                    window.statusInterval = setInterval(() => {
-                        updateStatus();
-                        refreshArticles();
-                    }, 2000);
-                }
-            } else {
-                menu.classList.remove('active');
-                // Clear the interval if daemon is not running
-                if (window.statusInterval) {
-                    clearInterval(window.statusInterval);
-                    window.statusInterval = null;
-                }
-            }
-        }
-
-        async function refreshArticles() {
-            const response = await fetch('/toplist');
-            const articles = await response.json();
-            const articlesContainer = document.getElementById('articles');
-            articlesContainer.innerHTML = '';
-
-            articles.forEach(article => {
-                const articleCard = document.createElement('div');
-                articleCard.className = 'article-card list';
-                articleCard.innerHTML = `
-                    <div class="article-header">
-                        <div class="favicon-container tooltip">
-                            <img src="https://www.google.com/s2/favicons?domain=${article.source_name}" alt="Favicon" class="favicon">
-                            <span class="tooltiptext">${article.source_name}</span>
-                        </div>
-                        <h3 class="article-title"><a href="${article.url}" target="_blank">${article.title}</a></h3>
-                        <span class="article-meta"></span>
-                    </div>
-                    <p class="article-summary">${article.summary}</p>
-                    <p class="full-content" style="display: none;">${article.content}</p>
-                    <a href="javascript:void(0);" class="read-more" onclick="toggleFullContent(this)">Read More</a>
-                `;
-                articlesContainer.appendChild(articleCard);
-            });
-        }
-
-        // Run status check every 2 seconds
-        checkProcessingAndMenu();
-
-        // Keep existing toggle function for manual control
-        function toggleMenu() {
-            const menu = document.getElementById('menu');
-            menu.classList.toggle('active');
-        }
-
-        // Modify click outside behavior to respect processing status
-        document.addEventListener('click', async function (event) {
-            const menu = document.getElementById('menu');
-            const burger = document.querySelector('.burger-menu');
-
-            if (!menu.contains(event.target) && !burger.contains(event.target)) {
-                // Check if we should allow closing
-                const response = await fetch('/status');
-                const status = await response.json();
-
-                const isProcessing = status.processing.is_active ||
-                    status.queues.prefetch_queue > 0 ||
-                    status.queues.download_queue > 0 ||
-                    status.queues.parse_queue > 0 ||
-                    status.queues.nlp_queue > 0;
-
-                if (!isProcessing) {
-                    menu.classList.remove('active');
-                }
-            }
-        });
-
-        // Remove auto-refresh interval
-        // setInterval(updateStatus, 2000);
-
-        // Close menu when clicking outside
-        document.addEventListener('click', function (event) {
-            const menu = document.getElementById('menu');
-            const burger = document.querySelector('.burger-menu');
-            if (!menu.contains(event.target) && !burger.contains(event.target)) {
-                menu.classList.remove('active');
-            }
-        });
-
         function toggleFullContent(element) {
             const fullContent = element.previousElementSibling;
             const summary = fullContent.previousElementSibling;
@@ -300,10 +230,71 @@
                 element.textContent = 'Read More';
             }
         }
-    </script>
-</body>
 
-</html>
+        function createArticleHTML(article) {
+            return `
+                <div class="article-card list">
+                    <div class="article-header">
+                        <img src="https://www.google.com/s2/favicons?domain=${article.source_name}" alt="Favicon" class="favicon" onerror="this.onerror=null;this.src='/static/default_favicon.ico';">
+                        <h3 class="article-title"><a href="${article.url}" target="_blank">${article.title}</a></h3>
+                        <span class="article-meta">${new Date(article.publish_date).toLocaleString()}</span>
+                    </div>
+                    <p class="article-summary">${article.summary}</p>
+                    <p class="full-content" style="display: none;">${article.content}</p>
+                    <div class="score-container">
+                        <div class="smiley-scoreboard" onmouseenter="showTooltip(this)" onmouseleave="hideTooltip(this)">
+                            ${article.score >= 0.1 ? '<span>😊</span>' : article.score >= 0.01 ? '<span>😐</span>' : '<span>😞</span>'}
+                            <div class="score-tooltip">
+                                <p>Overall Score: ${article.score}</p>
+                                <p>Title Score: ${article.score_details.title_score}</p>
+                                <p>Content Score: ${article.score_details.content_score}</p>
+                                <p>Weights: Title - ${article.score_details.weights.title}, Content - ${article.score_details.weights.content}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <a href="javascript:void(0);" class="read-more" onclick="toggleFullContent(this)">Read More</a>
+                </div>
+            `;
+        }
+
+        async function refreshArticles() {
+            const response = await fetch('/toplist');
+            const articles = await response.json();
+            const articlesContainer = document.getElementById('articles');
+            articlesContainer.innerHTML = '';
+
+            articles.forEach(article => {
+                const articleHTML = createArticleHTML(article);
+                articlesContainer.insertAdjacentHTML('beforeend', articleHTML);
+            });
+        }
+
+        // Run status check every 20 seconds
+        setInterval(() => {
+            updateStatus();
+            refreshArticles();
+        }, 20000);
+
+        // Modify click outside behavior to respect processing status
+        document.addEventListener('click', async function (event) {
+            const menu = document.getElementById('menu');
+            const burger = document.querySelector('.burger-menu');
+
+            if (!menu.contains(event.target) && !burger.contains(event.target)) {
+                menu.classList.remove('active');
+            }
+        });
+
+        function showTooltip(element) {
+            const tooltip = element.querySelector('.score-tooltip');
+            tooltip.style.display = 'block';
+        }
+
+        function hideTooltip(element) {
+            const tooltip = element.querySelector('.score-tooltip');
+            tooltip.style.display = 'none';
+        }
+    </script>
 </body>
 
 </html>

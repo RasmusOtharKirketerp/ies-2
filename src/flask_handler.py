@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, render_template, send_from_directory
 from src.article_manager import ArticleManager
 import os
+from datetime import datetime, timezone
 
 class FlaskRoutesHandler:
     def __init__(self, article_manager):
@@ -15,6 +16,7 @@ class FlaskRoutesHandler:
                         template_folder='../templates', 
                         static_folder='../static')  # Set template and static folders
         self.setup_routes()
+        self.add_custom_filters()
 
     def setup_routes(self):
         """
@@ -229,6 +231,26 @@ class FlaskRoutesHandler:
                 os.path.join(self.app.root_path, 'static'),
                 'favicon.ico', mimetype='image/vnd.microsoft.icon'
             )
+
+    def add_custom_filters(self):
+        """Add custom Jinja filters."""
+        @self.app.template_filter('time_since')
+        def time_since_filter(dt_str):
+            """Calculate the time since the given datetime string."""
+            dt = datetime.fromisoformat(dt_str)
+            now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
+            diff = now - dt
+
+            if diff.days > 0:
+                return f"{diff.days} day{'s' if diff.days > 1 else ''}"
+            elif diff.seconds > 3600:
+                hours = diff.seconds // 3600
+                return f"{hours} hour{'s' if hours > 1 else ''}"
+            elif diff.seconds > 60:
+                minutes = diff.seconds // 60
+                return f"{minutes} minute{'s' if minutes > 1 else ''}"
+            else:
+                return f"{diff.seconds} second{'s' if diff.seconds > 1 else ''}"
 
     def run(self, host="0.0.0.0", port=5000):
         """

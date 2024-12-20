@@ -251,3 +251,28 @@ button:hover {
 .full-content.show {
     display: block;
 }
+
+/* ...existing code... */
+.score-container {
+    position: relative;
+    display: inline-block;
+}
+
+.score-tooltip {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgb(47, 96, 187);
+    color: #fff;
+    padding: 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 100;
+}
+
+.score-container:hover .score-tooltip {
+    display: block;
+}
+/* ...existing code... */

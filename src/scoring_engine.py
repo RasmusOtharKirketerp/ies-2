@@ -3,7 +3,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from typing import List, Dict, Tuple
 import nltk
 from nltk.stem import WordNetLemmatizer
-from deep_translator import GoogleTranslator
 
 class ScoringEngine:
     def __init__(self):
@@ -11,7 +10,7 @@ class ScoringEngine:
         self.vectorizers = {}
         self.lemmatizers = {}
         self.stopwords = {}
-        self.translator = GoogleTranslator(source='auto')  # Set source language to auto-detect
+        self.translation_dict = self._initialize_translation_dict()
         self._initialize_nlp_resources()
 
     def _initialize_nlp_resources(self):
@@ -23,6 +22,51 @@ class ScoringEngine:
         # Initialize for English (fallback)
         self.lemmatizers['en'] = WordNetLemmatizer()
         self.stopwords['en'] = set(nltk.corpus.stopwords.words('english'))
+
+    def _initialize_translation_dict(self) -> Dict[str, Dict[str, str]]:
+        """Initialize a dictionary for translations."""
+        return {
+            'en': {
+                'danmark': 'denmark',
+                'teater': 'theater',
+                'ukraine': 'ukraine',
+                'rusland': 'russia',
+                'krig': 'war',
+                'fred': 'peace',
+                'klima': 'climate',
+                'teknologi': 'technology',
+                'sundhed': 'health',
+                'bitcoins': 'bitcoins',
+                'lgbt': 'lgbt',
+                'europa': 'europe',
+                'zelenskyj': 'zelensky',
+                'politi': 'police',
+                'eksplosion': 'explosion',
+                'kursfald': 'price drop',
+                'københavn': 'copenhagen',
+                'kina': 'china'
+            },
+            'da': {
+                'denmark': 'danmark',
+                'theater': 'teater',
+                'ukraine': 'ukraine',
+                'russia': 'rusland',
+                'war': 'krig',
+                'peace': 'fred',
+                'climate': 'klima',
+                'technology': 'teknologi',
+                'health': 'sundhed',
+                'bitcoins': 'bitcoins',
+                'lgbt': 'lgbt',
+                'europe': 'europa',
+                'zelensky': 'zelenskyj',
+                'police': 'politi',
+                'explosion': 'eksplosion',
+                'price drop': 'kursfald',
+                'copenhagen': 'københavn',
+                'china': 'kina'
+            }
+        }
 
     def calculate_article_scores(self, 
                                  articles: List[dict], 
@@ -78,15 +122,11 @@ class ScoringEngine:
         return groups
 
     def _translate_interest_data(self, interest_data: List[Tuple[str, float]], target_lang: str) -> List[Tuple[str, float]]:
-        """Translate interest data to the target language."""
+        """Translate interest data to the target language using a local dictionary."""
         translated_interest_data = []
         for term, weight in interest_data:
-            try:
-                translated_term = self.translator.translate(term, target=target_lang)
-                translated_interest_data.append((translated_term, weight))
-            except Exception as e:
-                print(f"Error translating term '{term}' to '{target_lang}': {e}")
-                translated_interest_data.append((term, weight))  # Use original term if translation fails
+            translated_term = self.translation_dict.get(target_lang, {}).get(term, term)
+            translated_interest_data.append((translated_term, weight))
         return translated_interest_data
 
     def _calculate_language_scores(self, 
