@@ -10,9 +10,11 @@ from .scoring_engine import ScoringEngine
 from urllib.parse import urlparse
 from langdetect import detect
 from datetime import datetime
+import hashlib
+import json
 
 class ArticleManager:
-    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5):
+    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5, scoring_weights_file='scoring_weights.json'):
         """
         Initialize the ArticleManager.
 
@@ -22,6 +24,7 @@ class ArticleManager:
             throttle_interval (int): Minimum time (seconds) between requests to a website.
             auto_start (bool): Whether to automatically start the daemon threads.
             articles_per_source (int): Maximum number of articles to fetch per source.
+            scoring_weights_file (str): Path to the JSON file containing scoring weights.
         """
         print(f"\n[INIT] Starting ArticleManager with {articles_per_source} articles per source")
         # Ensure NLTK resources are downloaded
@@ -49,143 +52,9 @@ class ArticleManager:
 
         self.daemon_running = False
         self.daemon_thread = None
-        self.scoring_weights = {  # Words and their associated weights
-    "danmark": 0.7,
-    "teater": 0.8,
-    "ukraine": 0.9,
-    "rusland": 0.3,
-    "krig": 0.8,
-    "fred": 0.7,
-    "klima": 0.6,
-    "teknologi": 1.0,
-    "sundhed": 0.6,
-    "bitcoins": 0.8,
-    "lgbt": 0.5,
-    "europa": 0.7,
-    "zelenskyj": 1.0,
-    "politi": 0.5,
-    "eksplosion": 0.6,
-    "kursfald": 0.6,
-    "københavn": 0.6,
-    "kina": 0.7,
-    "miljø": 0.6,
-    "biodiversitet": 0.6,
-    "demokrati": 0.8,
-    "valg": 0.7,
-    "flygtninge": 0.5,
-    "terror": -0.5,
-    "uddannelse": 0.9,
-    "helbred": 0.6,
-    "vaccination": 0.6,
-    "pandemi": 0.4,
-    "infrastruktur": 0.8,
-    "astronomi": 0.9,
-    "nordkorea": -0.3,
-    "kunst": 0.6,
-    "musik": 0.8,
-    "videnskab": 1.0,
-    "økonomi": 0.7,
-    "børneopdragelse": 0.4,
-    "familie": 0.5,
-    "arbejdsløshed": -0.3,
-    "integration": 0.6,
-    "religion": 0.4,
-    "genbrug": 0.7,
-    "affald": 0.6,
-    "energi": 1.0,
-    "solceller": 1.0,
-    "vindmøller": 1.0,
-    "atomkraft": 0.9,
-    "elbil": 1.0,
-    "natur": 0.7,
-    "hav": 0.6,
-    "skov": 0.7,
-    "bjerg": 0.5,
-    "data": 1.0,
-    "cybersikkerhed": 0.9,
-    "hacking": 0.8,
-    "mobiltelefon": 0.5,
-    "sociale medier": 0.3,
-    "fake news": 0.4,
-    "medier": 0.6,
-    "journalistik": 0.7,
-    "forbrug": 0.4,
-    "madspild": 0.6,
-    "landbrug": 0.4,
-    "fællesskab": 0.7,
-    "sprog": 0.7,
-    "historie": 0.8,
-    "fremtid": 1.0,
-    "fortid": 0.5,
-    "dansk": 0.7,
-    "internationalt": 0.7,
-    "handel": 0.6,
-    "grænser": 0.4,
-    "frihed": 0.8,
-    "censur": -0.5,
-    "kunstig intelligens": 1.0,
-    "maskinlæring": 1.0,
-    "robotter": 0.9,
-    "automation": 0.9,
-    "virksomheder": 0.6,
-    "arbejdsmarked": 0.4,
-    "inflation": 0.5,
-    "innovation": 1.0,
-    "hjerneforskning": 0.8,
-    "psykologi": 0.9,  # Reflects your understanding and experience with STPD
-    "filosofi": 0.7,
-    "etik": 0.8,
-    "samfund": 0.5,
-    "velfærd": 0.6,
-    "børn": 0.5,
-    "unge": 0.5,
-    "seniorer": 0.4,
-    "ensomhed": 0.5,  # A nuanced weight reflecting empathy but also challenge
-    "forandring": 0.8,
-    "eventyr": 0.6,
-    "turisme": 0.4,
-    "flyrejser": 0.3,
-    "tog": 0.7,
-    "transport": 0.6,
-    "menneskerettigheder": 0.8,
-    "rettigheder": 0.7,
-    "sport": 0.4,
-    "fodbold": 0.5,
-    "neurodiversitet": 1.0,  # High due to personal relevance
-    "schizotypi": 1.0,  # Directly tied to your diagnosis and advocacy
-    "medicin": 0.9,  # Reflecting your experience with quetiapine
-    "søvn": 0.7,
-    "arbejde": 0.6,
-    "kreativitet": 1.0,  # High due to your creative problem-solving abilities
-    "logik": 0.9,
-    "matematik": 0.8,
-    "programmering": 1.0,
-    "open source": 0.9,
-    "projekter": 1.0,
-    "autonomi": 0.8,
-    "systemdesign": 1.0,
-    "produktivitetsværktøjer": 0.8,
-    "flask": 1.0,  # Direct project relevance
-    "mqtt": 1.0,  # Direct project relevance
-    "docker": 1.0,  # Direct project relevance
-    "virtualisering": 0.9,
-    "garmin": 0.8,  # Reflects interest in fitness tech
-    "løb": 0.7,
-    "hund": 0.8,  # Reflecting your relationship with Kenobi
-    "dyrevelfærd": 0.7,
-    "muskelhukommelse": 0.6,
-    "terapi": 0.7,
-    "introspektion": 1.0,  # Reflects your reflective nature
-    "empati": 0.9,
-    "humor": 0.8,
-    "puns": 0.8,  # Specific to your enjoyment
-    "kommunikation": 0.7,
-    "brætspil": 0.5,
-    "programmeringssprog": 1.0,
-    "tf-idf": 0.9,  # Specific to your project
-    "nytår": 0.6
-}
 
+        self.scoring_weights_file = scoring_weights_file
+        self.scoring_weights = self._load_scoring_weights()
 
         self.last_access_times = {}  # Track the last access time for each source
         self.article_counter = 0  # Add counter for unique priorities
@@ -257,6 +126,18 @@ class ArticleManager:
         with self.lock:
             self.article_counter += 1
             return self.article_counter
+
+    def _load_scoring_weights(self):
+        """Load scoring weights from the JSON file."""
+        if os.path.exists(self.scoring_weights_file):
+            with open(self.scoring_weights_file, 'r') as file:
+                return json.load(file)
+        return {}
+
+    def _save_scoring_weights(self):
+        """Save scoring weights to the JSON file."""
+        with open(self.scoring_weights_file, 'w') as file:
+            json.dump(self.scoring_weights, file, indent=4)
 
     def prefetch_articles(self):
         """Fetch metadata (titles and URLs) for articles from sources."""
@@ -563,6 +444,7 @@ class ArticleManager:
             weight (float): The weight associated with the word.
         """
         self.scoring_weights[word.lower()] = weight
+        self._save_scoring_weights()
         self.recalculate_scores()
 
     def remove_scoring_word(self, word):
@@ -573,6 +455,7 @@ class ArticleManager:
             word (str): The word to be removed.
         """
         self.scoring_weights.pop(word.lower(), None)
+        self._save_scoring_weights()
         self.recalculate_scores()
 
     def edit_scoring_word(self, word, new_weight):
@@ -585,6 +468,7 @@ class ArticleManager:
         """
         if word.lower() in self.scoring_weights:
             self.scoring_weights[word.lower()] = new_weight
+            self._save_scoring_weights()
             self.recalculate_scores()
         else:
             print(f"Word '{word}' not found in scoring weights.")
