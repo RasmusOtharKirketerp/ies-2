@@ -1,8 +1,9 @@
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 import nltk
 from nltk.stem import WordNetLemmatizer
+from deep_translator import GoogleTranslator
 
 class ScoringEngine:
     def __init__(self):
@@ -10,6 +11,7 @@ class ScoringEngine:
         self.vectorizers = {}
         self.lemmatizers = {}
         self.stopwords = {}
+        self.translator = GoogleTranslator(source='auto')  # Set source language to auto-detect
         self._initialize_nlp_resources()
 
     def _initialize_nlp_resources(self):
@@ -23,8 +25,8 @@ class ScoringEngine:
         self.stopwords['en'] = set(nltk.corpus.stopwords.words('english'))
 
     def calculate_article_scores(self, 
-                               articles: List[dict], 
-                               interest_data: List[Tuple[str, float]]) -> np.ndarray:
+                                 articles: List[dict], 
+                                 interest_data: List[Tuple[str, float]]) -> np.ndarray:
         """
         Calculate relevance scores for articles using vector space model.
         
@@ -47,10 +49,11 @@ class ScoringEngine:
         
         for lang, group in articles_by_lang.items():
             try:
+                translated_interest_data = self._translate_interest_data(interest_data, lang)
                 lang_scores = self._calculate_language_scores(
                     group['articles'],
                     group['indices'],
-                    interest_data,
+                    translated_interest_data,
                     lang
                 )
                 
@@ -74,11 +77,23 @@ class ScoringEngine:
             groups[lang]['indices'].append(i)
         return groups
 
+    def _translate_interest_data(self, interest_data: List[Tuple[str, float]], target_lang: str) -> List[Tuple[str, float]]:
+        """Translate interest data to the target language."""
+        translated_interest_data = []
+        for term, weight in interest_data:
+            try:
+                translated_term = self.translator.translate(term, target=target_lang)
+                translated_interest_data.append((translated_term, weight))
+            except Exception as e:
+                print(f"Error translating term '{term}' to '{target_lang}': {e}")
+                translated_interest_data.append((term, weight))  # Use original term if translation fails
+        return translated_interest_data
+
     def _calculate_language_scores(self, 
-                                 articles: List[dict], 
-                                 indices: List[int],
-                                 interest_data: List[Tuple[str, float]], 
-                                 lang: str) -> np.ndarray:
+                                   articles: List[dict], 
+                                   indices: List[int],
+                                   interest_data: List[Tuple[str, float]], 
+                                   lang: str) -> np.ndarray:
         """Calculate scores for articles in a specific language."""
         # Prepare vectorizer
         if lang not in self.vectorizers:
@@ -90,7 +105,7 @@ class ScoringEngine:
 
         # Prepare texts and terms
         texts = [self._preprocess_text(article.get('content', ''), lang) 
-                for article in articles]
+                 for article in articles]
         
         interest_terms = [term for term, _ in interest_data]
         interest_weights = np.array([weight for _, weight in interest_data])

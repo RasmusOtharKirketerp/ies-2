@@ -8,6 +8,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from .scoring_engine import ScoringEngine
 from urllib.parse import urlparse
+from langdetect import detect
 
 class ArticleManager:
     def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5):
@@ -252,6 +253,7 @@ class ArticleManager:
             item["content"] = article_obj.text
             item["favicon"] = article_obj.meta_favicon or f"https://www.google.com/s2/favicons?domain={self._get_domain(item['url'])}"
             item["source_name"] = self._get_domain(item['url'])
+            item["language"] = detect(article_obj.text) if article_obj.text else 'da'  # Detect language or default to Danish
             
             if item["title"] and item["content"]:
                 print(f"[PARSE] Successfully parsed: {item['url']}")
