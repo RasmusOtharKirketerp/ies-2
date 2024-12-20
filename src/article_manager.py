@@ -7,6 +7,7 @@ import nltk
 import os
 from concurrent.futures import ThreadPoolExecutor
 from .scoring_engine import ScoringEngine
+from .cache_manager import CacheManager
 from urllib.parse import urlparse
 from langdetect import detect
 from datetime import datetime
@@ -14,7 +15,7 @@ import hashlib
 import json
 
 class ArticleManager:
-    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5, scoring_weights_file='scoring_weights.json'):
+    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5, scoring_weights_file='scoring_weights.json', cache_duration=3600):
         """
         Initialize the ArticleManager.
 
@@ -25,49 +26,45 @@ class ArticleManager:
             auto_start (bool): Whether to automatically start the daemon threads.
             articles_per_source (int): Maximum number of articles to fetch per source.
             scoring_weights_file (str): Path to the JSON file containing scoring weights.
+            cache_duration (int): Duration (seconds) to keep articles in cache.
         """
         print(f"\n[INIT] Starting ArticleManager with {articles_per_source} articles per source")
-        # Ensure NLTK resources are downloaded
         self._initialize_nltk()
         
-        # Configure newspaper
         self.config = Config()
         self.config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         self.config.request_timeout = 10
         self.config.memoize_articles = False
-        self.config.language = 'da'  # Set Danish as language
+        self.config.language = 'da'
         
         self.sources = sources
-        self.sources_obj = {}  # Store Source objects
         self.toplist_size = toplist_size
         self.throttle_interval = throttle_interval
-        self.articles = []  # Prefetched articles (metadata only)
-        self.toplist = []  # Fully fetched and scored articles
+        self.articles = []  # List to store articles
+        self.toplist = []  # Initialize toplist
 
-        # Separate queues for each pipeline stage
-        self.prefetch_queue = PriorityQueue()  # Queue for prefetch stage
-        self.download_queue = PriorityQueue()  # Queue for download stage
-        self.parse_queue = PriorityQueue()     # Queue for parse stage
-        self.nlp_queue = PriorityQueue()       # Queue for NLP stage
+        self.prefetch_queue = PriorityQueue()
+        self.download_queue = PriorityQueue()
+        self.parse_queue = PriorityQueue()
+        self.nlp_queue = PriorityQueue()
 
         self.daemon_running = False
-        self.daemon_thread = None
 
         self.scoring_weights_file = scoring_weights_file
         self.scoring_weights = self._load_scoring_weights()
 
-        self.last_access_times = {}  # Track the last access time for each source
-        self.article_counter = 0  # Add counter for unique priorities
-        self.lock = Lock()  # Ensure thread-safe updates to last_access_times and counter
+        self.last_access_times = {}
+        self.article_counter = 0
+        self.lock = Lock()
 
         self.articles_per_source = articles_per_source
-        self.max_workers = min(4, articles_per_source * len(sources))  # Adjust workers based on article count
+        self.max_workers = min(4, articles_per_source * len(sources))
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        self.articles_by_source = {}  # Track articles per source
 
-        self.sleep_time = 0.5  # Sleep time when queues are empty
+        self.sleep_time = 0.5
 
         self.scoring_engine = ScoringEngine()
+        self.cache_manager = CacheManager(cache_duration=cache_duration)
 
         self.scoring_stats = {
             "total_scored": 0,
@@ -76,15 +73,15 @@ class ArticleManager:
         }
 
         self.content_weights = {
-            "title": 0.4,    # Title importance weight
-            "content": 0.6,  # Content importance weight
+            "title": 0.4,
+            "content": 0.6,
         }
 
-        # Initialize articles after setup
+        self.load_cached_articles()
         self.prefetch_articles()
         if auto_start:
             self.start_daemon()
-        
+
     @staticmethod
     def _initialize_nltk():
         """Ensure all required NLTK resources are downloaded."""
@@ -108,12 +105,7 @@ class ArticleManager:
                 nltk.download(package, download_dir=nltk_data_dir)
 
     def _throttle_request(self, source_url):
-        """
-        Ensure requests to a source URL are throttled to respect the interval.
-
-        Args:
-            source_url (str): The URL of the source being accessed.
-        """
+        """Ensure requests to a source URL are throttled to respect the interval."""
         with self.lock:
             last_access = self.last_access_times.get(source_url, 0)
             elapsed_time = time.time() - last_access
@@ -139,15 +131,22 @@ class ArticleManager:
         with open(self.scoring_weights_file, 'w') as file:
             json.dump(self.scoring_weights, file, indent=4)
 
+    def load_cached_articles(self):
+        """Load all cached minimalistic articles."""
+        print("\n[CACHE] Loading cached articles")
+        for source_url in self.sources:
+            cached_article = self.cache_manager.load_from_cache(source_url)
+            if cached_article:
+                print(f"[CACHE] Loaded cached article: {cached_article['url']}")
+                self.toplist.append(cached_article)
+
     def prefetch_articles(self):
         """Fetch metadata (titles and URLs) for articles from sources."""
         print("\n[PREFETCH] Starting to prefetch articles")
-        self.articles_by_source = {source: [] for source in self.sources}  # Reset tracking
         
         for source_url in self.sources:
             self._throttle_request(source_url)
             try:
-                # Create and build Source object with config
                 source = Source(source_url, config=self.config)
                 print(f"[PREFETCH] Building source: {source_url}")
                 source.build()
@@ -156,25 +155,19 @@ class ArticleManager:
                     print(f"[WARNING] No articles found for {source_url}")
                     continue
                 
-                # Sort articles by publication date (newest first)
                 sorted_articles = sorted(source.articles, key=lambda x: x.publish_date or 0, reverse=True)
-                
-                # Limit number of articles per source
                 articles_to_process = sorted_articles[:self.articles_per_source]
                 print(f"[INFO] Processing {len(articles_to_process)} of {len(source.articles)} articles from {source_url}")
-                self.sources_obj[source_url] = source
                 
-                # Queue limited number of articles from the source
                 for article in articles_to_process:
                     if not article.url:
                         continue
                     print(f"[PREFETCH] Found article: {article.url}")
                     priority = self.get_next_priority()
-                    # Create Article object with config
                     article_obj = Article(article.url, config=self.config)
                     item = {
                         "url": article.url,
-                        "source_url": source_url,  # Add source tracking
+                        "source_url": source_url,
                         "article_obj": article_obj,
                         "title": None,
                         "score": None,
@@ -182,11 +175,9 @@ class ArticleManager:
                         "summary": None
                     }
                     self.prefetch_queue.put((priority, item))
-                    self.articles_by_source[source_url].append(item)
             except Exception as e:
                 print(f"[ERROR] Building source {source_url}: {str(e)}")
         
-        # Start the daemon after prefetching is complete
         if not self.daemon_running:
             self.start_daemon()
 
@@ -217,6 +208,12 @@ class ArticleManager:
                 
             priority, item = self.download_queue.get()
             article_obj = item["article_obj"]
+            cached_article = self.cache_manager.load_from_cache(article_obj.url)
+            if cached_article:
+                print(f"[CACHE] Loaded article from cache: {article_obj.url}")
+                self.toplist.append(cached_article)
+                continue
+
             try:
                 print(f"[DOWNLOAD] Processing: {article_obj.url}")
                 self._throttle_request(article_obj.url)
@@ -252,8 +249,8 @@ class ArticleManager:
             item["content"] = article_obj.text
             item["favicon"] = article_obj.meta_favicon or f"https://www.google.com/s2/favicons?domain={self._get_domain(item['url'])}" or "/static/default_favicon.ico"
             item["source_name"] = self._get_domain(item['url'])
-            item["language"] = detect(article_obj.text) if article_obj.text else 'da'  # Detect language or default to Danish
-            item["publish_date"] = article_obj.publish_date or datetime.now()  # Use current time if publish date is not available
+            item["language"] = detect(article_obj.text) if article_obj.text else 'da'
+            item["publish_date"] = article_obj.publish_date or datetime.now()
             
             if item["title"] and item["content"]:
                 print(f"[PARSE] Successfully parsed: {item['url']}")
@@ -276,7 +273,6 @@ class ArticleManager:
                     time.sleep(self.sleep_time)
                     continue
 
-                # Get items to process
                 items = []
                 for _ in range(min(self.max_workers, self.parse_queue.qsize())):
                     if not self.parse_queue.empty():
@@ -285,13 +281,11 @@ class ArticleManager:
                 if not items:
                     continue
 
-                # Process batch
                 futures = []
                 for priority, item in items:
                     future = self.executor.submit(self.process_single_parse, priority, item)
                     futures.append((future, priority, item))
                 
-                # Wait for batch to complete
                 for future, priority, item in futures:
                     try:
                         success = future.result(timeout=30)
@@ -319,6 +313,7 @@ class ArticleManager:
                 item["summary"] = article_obj.summary
                 self.score_titles([item])
                 self.update_toplist(item)
+                self.cache_manager.save_to_cache(item)  # Save to cache after NLP processing
                 print(f"[NLP] Successfully processed: {item['url']}")
             except Exception as e:
                 print(f"[ERROR] NLP processing {item['url']}: {str(e)}")
@@ -338,23 +333,19 @@ class ArticleManager:
         if not articles:
             return
             
-        # Convert scoring weights to interest data format
         interest_data = [(word, weight) for word, weight in self.scoring_weights.items()]
         
         for article in articles:
-            # Score title
             title_score = self.scoring_engine.calculate_article_scores(
                 [{"content": article["title"]}], 
                 interest_data
             )[0] if article["title"] else 0
             
-            # Score content
             content_score = self.scoring_engine.calculate_article_scores(
                 [{"content": article["content"]}], 
                 interest_data
             )[0] if article["content"] else 0
             
-            # Combine scores with weights
             final_score = (
                 self.content_weights["title"] * title_score +
                 self.content_weights["content"] * content_score
@@ -369,12 +360,7 @@ class ArticleManager:
             self.update_scoring_stats(final_score)
 
     def update_toplist(self, article):
-        """
-        Add a new article to the toplist if it qualifies.
-
-        Args:
-            article (dict): Fully fetched article with score.
-        """
+        """Add a new article to the toplist if it qualifies."""
         if len(self.toplist) < self.toplist_size:
             self.toplist.append(article)
         else:
@@ -388,7 +374,6 @@ class ArticleManager:
             print("[DAEMON] Starting article processing daemon...")
             self.daemon_running = True
             
-            # Start all processing threads
             threads = [
                 threading.Thread(target=self.process_prefetch_queue, daemon=True),
                 threading.Thread(target=self.process_download_queue, daemon=True),
@@ -403,8 +388,7 @@ class ArticleManager:
             print("[DAEMON] All processing threads started")
 
     def stop_daemon(self):
-        """
-        Stop all daemon threads gracefully."""
+        """Stop all daemon threads gracefully."""
         if self.daemon_running:
             print("[DAEMON] Stopping article processing daemon...")
             self.daemon_running = False
@@ -421,51 +405,46 @@ class ArticleManager:
             "content": article["content"],
             "summary": article["summary"],
             "favicon": article["favicon"] or "/static/default_favicon.ico",
-            "source_name": self._get_domain(article["url"]),  # Ensure correct domain extraction
+            "source_name": self._get_domain(article["url"]),
             "publish_date": article["publish_date"].isoformat() if article.get("publish_date") else None
         }
 
     def get_toplist(self):
-        """
-        Retrieve the current toplist of articles.
-
-        Returns:
-            list: Top `x` articles sorted by score.
-        """
+        """Retrieve the current toplist of articles."""
         sorted_toplist = sorted(self.toplist, key=lambda x: x["score"], reverse=True)
         return [self._serialize_article(article) for article in sorted_toplist]
 
-    def add_scoring_word(self, word, weight):
-        """
-        Dynamically add or update a scoring word and its weight.
+    def get_minimalistic_article(self, article):
+        """Extract minimalistic article object for rendering."""
+        return {
+            "url": article["url"],
+            "title": article["title"],
+            "summary": article["summary"],
+            "score": article["score"],
+            "favicon": article["favicon"] or "/static/default_favicon.ico",
+            "source_name": self._get_domain(article["url"]),
+            "publish_date": article["publish_date"].isoformat() if article.get("publish_date") else None
+        }
 
-        Args:
-            word (str): The word to be added or updated.
-            weight (float): The weight associated with the word.
-        """
+    def get_minimalistic_toplist(self):
+        """Retrieve the current toplist of articles in minimalistic form."""
+        sorted_toplist = sorted(self.toplist, key=lambda x: x["score"], reverse=True)
+        return [self.get_minimalistic_article(article) for article in sorted_toplist]
+
+    def add_scoring_word(self, word, weight):
+        """Dynamically add or update a scoring word and its weight."""
         self.scoring_weights[word.lower()] = weight
         self._save_scoring_weights()
         self.recalculate_scores()
 
     def remove_scoring_word(self, word):
-        """
-        Remove a scoring word from the scoring weights.
-
-        Args:
-            word (str): The word to be removed.
-        """
+        """Remove a scoring word from the scoring weights."""
         self.scoring_weights.pop(word.lower(), None)
         self._save_scoring_weights()
         self.recalculate_scores()
 
     def edit_scoring_word(self, word, new_weight):
-        """
-        Edit an existing scoring word with a new weight.
-
-        Args:
-            word (str): The word to be updated.
-            new_weight (float): The new weight associated with the word.
-        """
+        """Edit an existing scoring word with a new weight."""
         if word.lower() in self.scoring_weights:
             self.scoring_weights[word.lower()] = new_weight
             self._save_scoring_weights()
@@ -474,24 +453,19 @@ class ArticleManager:
             print(f"Word '{word}' not found in scoring weights.")
 
     def recalculate_scores(self):
-        """
-        Recalculate scores for all articles based on updated scoring weights.
-        """
+        """Recalculate scores for all articles based on updated scoring weights."""
         interest_data = [(word, weight) for word, weight in self.scoring_weights.items()]
         for article in self.toplist:
-            # Score title
             title_score = self.scoring_engine.calculate_article_scores(
                 [{"content": article["title"]}], 
                 interest_data
             )[0] if article["title"] else 0
             
-            # Score content
             content_score = self.scoring_engine.calculate_article_scores(
                 [{"content": article["content"]}], 
                 interest_data
             )[0] if article["content"] else 0
             
-            # Combine scores with weights
             final_score = (
                 self.content_weights["title"] * title_score +
                 self.content_weights["content"] * content_score
@@ -507,12 +481,7 @@ class ArticleManager:
         self.toplist = sorted(self.toplist, key=lambda x: x["score"], reverse=True)[:self.toplist_size]
 
     def get_queue_status(self):
-        """
-        Retrieve the current status of all queues.
-
-        Returns:
-            dict: A dictionary containing the size of each queue.
-        """
+        """Retrieve the current status of all queues."""
         status = {
             "queues": {
                 "prefetch_queue": self.prefetch_queue.qsize(),
@@ -537,16 +506,7 @@ class ArticleManager:
                 "scoring_engine": "vector_space_model"
             },
             "articles": [
-                {
-                    "url": article["url"],
-                    "title": article["title"],
-                    "score": article["score"],
-                    "score_details": article.get("score_details", {}),
-                    "content": article["content"],
-                    "summary": article["summary"],
-                    "favicon": article["favicon"],
-                    "source_name": self._get_domain(article["url"])
-                }
+                self.get_minimalistic_article(article)
                 for article in self.toplist
             ]
         }
@@ -561,54 +521,3 @@ class ArticleManager:
         """Count articles for a specific source in a queue."""
         queue_contents = self.get_queue_contents(queue)
         return sum(1 for _, item in queue_contents if item["source_url"] == source_url)
-
-    def get_sources(self):
-        """
-        Get the list of news sources with active status.
-
-        Returns:
-            dict: Dictionary with sources and their status
-        """
-        sources_status = {}
-        for source_url in self.sources:
-            try:
-                # Use cached source object if available
-                source_obj = self.sources_obj.get(source_url)
-                if not source_obj:
-                    source_obj = Source(source_url, config=self.config)
-                    source_obj.build()
-                
-                # Count articles in each queue for this source
-                in_prefetch = self.get_articles_in_queue_for_source(self.prefetch_queue, source_url)
-                in_download = self.get_articles_in_queue_for_source(self.download_queue, source_url)
-                in_parse = self.get_articles_in_queue_for_source(self.parse_queue, source_url)
-                in_nlp = self.get_articles_in_queue_for_source(self.nlp_queue, source_url)
-                
-                # Get total articles originally fetched for this source
-                total_articles = len(self.articles_by_source.get(source_url, []))
-
-                sources_status[source_url] = {
-                    "url": source_url,
-                    "status": "active",
-                    "article_count": total_articles,
-                    "articles_by_stage": {
-                        "prefetch": in_prefetch,
-                        "download": in_download,
-                        "parse": in_parse,
-                        "nlp": in_nlp
-                    }
-                }
-            except Exception as e:
-                sources_status[source_url] = {
-                    "url": source_url,
-                    "status": "error",
-                    "error": str(e),
-                    "article_count": 0,
-                    "articles_by_stage": {
-                        "prefetch": 0,
-                        "download": 0,
-                        "parse": 0,
-                        "nlp": 0
-                    }
-                }
-        return sources_status
