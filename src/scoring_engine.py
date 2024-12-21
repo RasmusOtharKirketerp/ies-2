@@ -3,6 +3,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from typing import List, Dict, Tuple
 import nltk
 from nltk.stem import WordNetLemmatizer
+import argostranslate.package
+import argostranslate.translate
 
 class ScoringEngine:
     def __init__(self):
@@ -10,8 +12,21 @@ class ScoringEngine:
         self.vectorizers = {}
         self.lemmatizers = {}
         self.stopwords = {}
-        self.translation_dict = self._initialize_translation_dict()
+        self._initialize_translation()
         self._initialize_nlp_resources()
+
+    def _initialize_translation(self):
+        """Initialize the translation package."""
+        argostranslate.package.update_package_index()
+        available_packages = argostranslate.package.get_available_packages()
+        package_to_install = next(
+            filter(
+                lambda x: x.from_code == "en" and x.to_code == "da",
+                available_packages
+            )
+        )
+        argostranslate.package.install_from_path(package_to_install.download())
+        self.translator = argostranslate.translate
 
     def _initialize_nlp_resources(self):
         """Initialize NLP resources for supported languages."""
@@ -22,51 +37,6 @@ class ScoringEngine:
         # Initialize for English (fallback)
         self.lemmatizers['en'] = WordNetLemmatizer()
         self.stopwords['en'] = set(nltk.corpus.stopwords.words('english'))
-
-    def _initialize_translation_dict(self) -> Dict[str, Dict[str, str]]:
-        """Initialize a dictionary for translations."""
-        return {
-            'en': {
-                'danmark': 'denmark',
-                'teater': 'theater',
-                'ukraine': 'ukraine',
-                'rusland': 'russia',
-                'krig': 'war',
-                'fred': 'peace',
-                'klima': 'climate',
-                'teknologi': 'technology',
-                'sundhed': 'health',
-                'bitcoins': 'bitcoins',
-                'lgbt': 'lgbt',
-                'europa': 'europe',
-                'zelenskyj': 'zelensky',
-                'politi': 'police',
-                'eksplosion': 'explosion',
-                'kursfald': 'price drop',
-                'københavn': 'copenhagen',
-                'kina': 'china'
-            },
-            'da': {
-                'denmark': 'danmark',
-                'theater': 'teater',
-                'ukraine': 'ukraine',
-                'russia': 'rusland',
-                'war': 'krig',
-                'peace': 'fred',
-                'climate': 'klima',
-                'technology': 'teknologi',
-                'health': 'sundhed',
-                'bitcoins': 'bitcoins',
-                'lgbt': 'lgbt',
-                'europe': 'europa',
-                'zelensky': 'zelenskyj',
-                'police': 'politi',
-                'explosion': 'eksplosion',
-                'price drop': 'kursfald',
-                'copenhagen': 'københavn',
-                'china': 'kina'
-            }
-        }
 
     def calculate_article_scores(self, 
                                  articles: List[dict], 
@@ -112,7 +82,7 @@ class ScoringEngine:
 
     def _group_by_language(self, articles: List[dict]) -> Dict:
         """Group articles by language."""
-        groups = {}
+        groups: Dict[str, Dict[str, List]] = {}
         for i, article in enumerate(articles):
             lang = article.get('language', 'da')  # Default to Danish
             if lang not in groups:
@@ -122,10 +92,13 @@ class ScoringEngine:
         return groups
 
     def _translate_interest_data(self, interest_data: List[Tuple[str, float]], target_lang: str) -> List[Tuple[str, float]]:
-        """Translate interest data to the target language using a local dictionary."""
+        """Translate interest data to the target language using argostranslate."""
         translated_interest_data = []
         for term, weight in interest_data:
-            translated_term = self.translation_dict.get(target_lang, {}).get(term, term)
+            if target_lang == 'da':
+                translated_term = self.translator.translate(term, "en", "da")
+            else:
+                translated_term = term
             translated_interest_data.append((translated_term, weight))
         return translated_interest_data
 

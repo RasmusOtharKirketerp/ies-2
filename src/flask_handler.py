@@ -33,6 +33,7 @@ class FlaskRoutesHandler:
         def get_status():
             """Get the status of all queues."""
             status = self.article_manager.get_queue_status()
+            self.article_manager.showCpuAndworkerForEachQueue()
             return jsonify(status)
 
         @self.app.route("/toplist", methods=["GET"])
@@ -105,6 +106,7 @@ class FlaskRoutesHandler:
             <html>
             <head>
                 <title>News API Documentation</title>
+                <meta charset="UTF-8">
                 <style>
                     body { font-family: Arial, sans-serif; margin: 40px; max-width: 1000px; margin: 0 auto; padding: 20px; }
                     .endpoint { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }

@@ -2,6 +2,7 @@
 <html>
 
 <head>
+    <meta charset="UTF-8">
     <title>Rasmus News Article browser</title>
     <link rel="stylesheet" type="text/css" href="/static/styles.css">
 </head>
@@ -91,56 +92,19 @@
                     <img src="https://www.google.com/s2/favicons?domain={{ article.source_name }}" alt="Favicon"
                         class="favicon" onerror="this.onerror=null;this.src='/static/default_favicon.ico';">
                     <h3 class="article-title"><a href="{{ article.url }}" target="_blank">{{ article.title }}</a></h3>
-                    <span class="article-meta">{{ article.publish_date|time_since }} ago</span>
+                    <span class="article-meta">{{ article.publish_date }}</span>
                 </div>
                 <p class="article-summary">{{ article.summary }}</p>
                 <p class="full-content" style="display: none;">{{ article.content }}</p>
                 <div class="score-container">
                     <div class="smiley-scoreboard" onmouseenter="showTooltip(this)" onmouseleave="hideTooltip(this)">
-                        {% if article.score >= 1 %}
-                        <span>🌟</span>
-                        {% elif article.score >= 0.95 %}
-                        <span>😀</span>
-                        {% elif article.score >= 0.9 %}
-                        <span>😄</span>
-                        {% elif article.score >= 0.85 %}
-                        <span>🙂</span>
-                        {% elif article.score >= 0.8 %}
+                        {% if article.score >= 0.1 %}
                         <span>😊</span>
-                        {% elif article.score >= 0.75 %}
-                        <span>😉</span>
-                        {% elif article.score >= 0.7 %}
-                        <span>😌</span>
-                        {% elif article.score >= 0.65 %}
-                        <span>😏</span>
-                        {% elif article.score >= 0.6 %}
+                        {% elif article.score >= 0.01 %}
                         <span>😐</span>
-                        {% elif article.score >= 0.55 %}
-                        <span>😶</span>
-                        {% elif article.score >= 0.5 %}
-                        <span>😑</span>
-                        {% elif article.score >= 0.45 %}
-                        <span>🙃</span>
-                        {% elif article.score >= 0.4 %}
-                        <span>😔</span>
-                        {% elif article.score >= 0.35 %}
-                        <span>😟</span>
-                        {% elif article.score >= 0.3 %}
-                        <span>😕</span>
-                        {% elif article.score >= 0.25 %}
-                        <span>😣</span>
-                        {% elif article.score >= 0.2 %}
-                        <span>😞</span>
-                        {% elif article.score >= 0.15 %}
-                        <span>😖</span>
-                        {% elif article.score >= 0.1 %}
-                        <span>😢</span>
-                        {% elif article.score >= 0.05 %}
-                        <span>😭</span>
                         {% else %}
-                        <span>😡</span>
+                        <span>😞</span>
                         {% endif %}
-
                         <div class="score-tooltip">
                             <p>Overall Score: {{ article.score }}</p>
                             <p>Title Score: {{ article.score_details.title_score }}</p>

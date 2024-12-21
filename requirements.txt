@@ -34,3 +34,4 @@ deep-translator==1.8.3
 
 # Language Detection
 langdetect==1.0.9
+argostranslate==1.9.6

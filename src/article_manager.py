@@ -15,7 +15,7 @@ import hashlib
 import json
 
 class ArticleManager:
-    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5, scoring_weights_file='scoring_weights.json', cache_duration=3600):
+    def __init__(self, sources, toplist_size=10, throttle_interval=2, auto_start=True, articles_per_source=5, scoring_weights_file='scoring_weights.json', cache_duration=3600, max_workers=None):
         """
         Initialize the ArticleManager.
 
@@ -27,6 +27,7 @@ class ArticleManager:
             articles_per_source (int): Maximum number of articles to fetch per source.
             scoring_weights_file (str): Path to the JSON file containing scoring weights.
             cache_duration (int): Duration (seconds) to keep articles in cache.
+            site_delay (int): Delay (seconds) between requests to the same site.
         """
         print(f"\n[INIT] Starting ArticleManager with {articles_per_source} articles per source")
         self._initialize_nltk()
@@ -36,6 +37,7 @@ class ArticleManager:
         self.config.request_timeout = 10
         self.config.memoize_articles = False
         self.config.language = 'da'
+        self.max_workers = max_workers
         
         self.sources = sources
         self.toplist_size = toplist_size
@@ -58,10 +60,10 @@ class ArticleManager:
         self.lock = Lock()
 
         self.articles_per_source = articles_per_source
-        self.max_workers = min(4, articles_per_source * len(sources))
+        self.max_workers = self.max_workers or os.cpu_count()
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
 
-        self.sleep_time = 0.5
+        self.sleep_time = 0.01  # Short sleep time to release CPU
 
         self.scoring_engine = ScoringEngine()
         self.cache_manager = CacheManager(cache_duration=cache_duration)
@@ -81,6 +83,31 @@ class ArticleManager:
         self.prefetch_articles()
         if auto_start:
             self.start_daemon()
+
+        # Initialize last_distribute_time and current_distribution
+        self.last_distribute_time = 0
+        self.current_distribution = None
+
+    def getArticleShortInfoTxt(text):
+        last_char = -25
+        if text:
+            return f"Text: {text[last_char:]}"
+        return "***"
+    
+    def getArticleShortInfo(self, article):
+        last_char = -25
+        retval = "No info in article"
+        if article["title"]:
+            retval = f"Title: {article['title'][last_char:]}"
+        else:
+            retval = f'url: {article["url"][last_char:]}'
+        return retval
+    
+    def showCpuAndworkerForEachQueue(self):
+        print(f"prefetch_queue: {self.prefetch_queue.qsize()} workers: {self.executor._max_workers}")
+        print(f"download_queue: {self.download_queue.qsize()} workers: {self.executor._max_workers}")
+        print(f"parse_queue: {self.parse_queue.qsize()} workers: {self.executor._max_workers}")
+        print(f"nlp_queue: {self.nlp_queue.qsize()} workers: {self.executor._max_workers}")
 
     @staticmethod
     def _initialize_nltk():
@@ -122,13 +149,13 @@ class ArticleManager:
     def _load_scoring_weights(self):
         """Load scoring weights from the JSON file."""
         if os.path.exists(self.scoring_weights_file):
-            with open(self.scoring_weights_file, 'r') as file:
+            with open(self.scoring_weights_file, 'r', encoding='utf-8') as file:
                 return json.load(file)
         return {}
 
     def _save_scoring_weights(self):
         """Save scoring weights to the JSON file."""
-        with open(self.scoring_weights_file, 'w') as file:
+        with open(self.scoring_weights_file, 'w', encoding='utf-8') as file:
             json.dump(self.scoring_weights, file, indent=4)
 
     def load_cached_articles(self):
@@ -137,7 +164,9 @@ class ArticleManager:
         for source_url in self.sources:
             cached_article = self.cache_manager.load_from_cache(source_url)
             if cached_article:
-                print(f"[CACHE] Loaded cached article: {cached_article['url']}")
+                print(f"[CACHE] Loaded cached article: ", getArticleShortInfoTxt( 
+                                                                   {cached_article['url']})
+                    )
                 self.toplist.append(cached_article)
 
     def prefetch_articles(self):
@@ -148,21 +177,21 @@ class ArticleManager:
             self._throttle_request(source_url)
             try:
                 source = Source(source_url, config=self.config)
-                print(f"[PREFETCH] Building source: {source_url}")
+                print(f"[PREFETCH] Building source: ", self.getArticleShortInfo())
                 source.build()
                 
                 if not source.articles:
-                    print(f"[WARNING] No articles found for {source_url}")
+                    print(f"[WARNING] No articles found for ", self.getArticleShortInfo())
                     continue
                 
                 sorted_articles = sorted(source.articles, key=lambda x: x.publish_date or 0, reverse=True)
                 articles_to_process = sorted_articles[:self.articles_per_source]
-                print(f"[INFO] Processing {len(articles_to_process)} of {len(source.articles)} articles from {source_url}")
+                print(f"[INFO] Processing {len(articles_to_process)} of {len(source.articles)} articles from ", self.getArticleShortInfo())
                 
                 for article in articles_to_process:
                     if not article.url:
                         continue
-                    print(f"[PREFETCH] Found article: {article.url}")
+                    print(f"[PREFETCH] Found article: ", self.getArticleShortInfo())
                     priority = self.get_next_priority()
                     article_obj = Article(article.url, config=self.config)
                     item = {
@@ -176,7 +205,7 @@ class ArticleManager:
                     }
                     self.prefetch_queue.put((priority, item))
             except Exception as e:
-                print(f"[ERROR] Building source {source_url}: {str(e)}")
+                print(f"[ERROR] Building source ")
         
         if not self.daemon_running:
             self.start_daemon()
@@ -188,20 +217,82 @@ class ArticleManager:
                 self.parse_queue.empty() and 
                 self.nlp_queue.empty())
 
+    def distribute_workers(self):
+        """
+        Distribute workers across the queues (prefetch, download, parse, nlp)
+        based on queue size—BUT only recalculate if at least 10 seconds have
+        passed since the last distribution.
+        """
+        now = time.time()
+        # Only recalculate if 10 seconds have passed
+        if (now - self.last_distribute_time) < 10:
+            # If we already have a distribution, just return it
+            if self.current_distribution is not None:
+                #print("Returning cached distribution (less than 10s since last calculation).")
+                return self.current_distribution
+
+        # Otherwise, we recalculate the distribution
+        print("Recalculating worker distribution...")
+        total_workers = self.max_workers
+        min_workers = 1  # Each queue must have at least 1 worker
+
+        # Get the current sizes of each queue
+        queue_sizes = {
+            'prefetch_queue': self.prefetch_queue.qsize(),
+            'download_queue': self.download_queue.qsize(),
+            'parse_queue': self.parse_queue.qsize(),
+            'nlp_queue': self.nlp_queue.qsize()
+        }
+
+        # Initialize each queue with the minimum number of workers
+        workers = {queue_name: min_workers for queue_name in queue_sizes}
+
+        # Subtract the workers we have already assigned (1 each)
+        total_workers -= len(queue_sizes) * min_workers
+
+        # Distribute remaining workers based on the largest queue sizes first
+        while total_workers > 0:
+            # Find the queue with the maximum remaining size
+            max_queue_name = max(queue_sizes, key=queue_sizes.get)
+
+            # If that queue has no tasks waiting, break early
+            if queue_sizes[max_queue_name] == 0:
+                break
+
+            # Assign one more worker to that queue
+            workers[max_queue_name] += 1
+
+            # Conceptually "decrement" a task from that queue
+            queue_sizes[max_queue_name] -= 1
+
+            # Decrement the total worker pool
+            total_workers -= 1
+
+        # Update time and store the new distribution
+        self.last_distribute_time = now
+        self.current_distribution = workers
+
+        print(f"Worker distribution: {workers}")
+        return workers
+
     def process_prefetch_queue(self):
         """Process articles from the prefetch queue and move to the download queue."""
         while self.daemon_running:
+            workers = self.distribute_workers()
+            self.executor._max_workers = workers['prefetch_queue']
             if self.prefetch_queue.empty():
                 time.sleep(self.sleep_time)
                 continue
                 
             priority, article = self.prefetch_queue.get()
-            print(f"[PREFETCH] Moving article to download queue: {article['url']}")
+            print(f"[PREFETCH] Moving article to download queue: ", self.getArticleShortInfo())
             self.download_queue.put((priority, article))
 
     def process_download_queue(self):
         """Download article content and move to the parse queue."""
         while self.daemon_running:
+            workers = self.distribute_workers()
+            self.executor._max_workers = workers['download_queue']
             if self.download_queue.empty():
                 time.sleep(self.sleep_time)
                 continue
@@ -215,8 +306,9 @@ class ArticleManager:
                 continue
 
             try:
-                print(f"[DOWNLOAD] Processing: {article_obj.url}")
+                print(f"[DOWNLOAD] Processing: ", self.getArticleShortInfo())
                 self._throttle_request(article_obj.url)
+                self._apply_site_delay()  # Apply site-specific delay
                 article_obj.download()
                 if article_obj.html:
                     self.parse_queue.put((priority, item))
@@ -256,7 +348,6 @@ class ArticleManager:
                 print(f"[PARSE] Successfully parsed: {item['url']}")
                 self.nlp_queue.put((priority, item))
                 return True
-            else:
                 print(f"[PARSE] Missing content after parse: {item['url']}")
                 return False
                 
@@ -268,6 +359,8 @@ class ArticleManager:
         """Parse downloaded articles concurrently and move to the NLP queue."""
         print(f"[PARSE] Starting parse queue processor with {self.max_workers} workers")
         while self.daemon_running:
+            workers = self.distribute_workers()
+            self.executor._max_workers = workers['parse_queue']
             try:
                 if self.parse_queue.empty():
                     time.sleep(self.sleep_time)
@@ -301,20 +394,49 @@ class ArticleManager:
     def process_nlp_queue(self):
         """Run NLP on parsed articles and update toplist."""
         while self.daemon_running:
+            workers = self.distribute_workers()
+            self.executor._max_workers = workers['nlp_queue']
             if self.nlp_queue.empty():
                 time.sleep(self.sleep_time)
                 continue
-                
+
             priority, item = self.nlp_queue.get()
             try:
+
+                # Start processing the article
                 print(f"[NLP] Processing: {item['url']}")
+                start_time = time.time()
+
+                # Perform NLP on the article
                 article_obj = item["article_obj"]
+                nlp_start = time.time()
                 article_obj.nlp()
+                nlp_end = time.time()
                 item["summary"] = article_obj.summary
+                print(f"[NLP] Completed in {nlp_end - nlp_start:.2f} seconds")
+
+                # Score the article's title
+                print(f"[NLP SCORES] Starting")
+                score_start = time.time()
                 self.score_titles([item])
+                score_end = time.time()
+                print(f"[NLP SCORES] Completed in {score_end - score_start:.2f} seconds")
+                print(f"[NLP Scored] {item['url']} with score {item['score']}")
+
+                # Update the toplist with the new item
+                print(f"[NLP Update toplist]")
+                update_toplist_start = time.time()
                 self.update_toplist(item)
-                self.cache_manager.save_to_cache(item)  # Save to cache after NLP processing
-                print(f"[NLP] Successfully processed: {item['url']}")
+                update_toplist_end = time.time()
+                print(f"[NLP Updated toplist] Completed in {update_toplist_end - update_toplist_start:.2f} seconds")
+
+                # Save the processed item to cache
+                cache_start = time.time()
+                self.cache_manager.save_to_cache(item)
+                cache_end = time.time()
+                print(f"[NLP] Saved to cache in {cache_end - cache_start:.2f} seconds")
+                print(f"[NLP] Successfully processed: {item['url']} in {cache_end - start_time:.2f} seconds")
+
             except Exception as e:
                 print(f"[ERROR] NLP processing {item['url']}: {str(e)}")
 
